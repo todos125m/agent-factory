@@ -1,0 +1,471 @@
+<title>مدیر Agent Factory</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&display=swap">
+<style>
+:root{
+  --bg:#F3F5F4; --surface:#FFFFFF; --ink:#1A1D1C; --muted:#5A615E; --line:#D9DEDB;
+  --accent:#1D5F7A; --accent-ink:#FFFFFF; --accent-soft:#E2EDF1; --warn:#8A5A0B; --warn-soft:#F4EAD6; --bad:#A3312A;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131615; --surface:#1C201F; --ink:#ECEFED; --muted:#A2AAA6; --line:#2F3533;
+    --accent:#7BB8D2; --accent-ink:#0E1A20; --accent-soft:#1D2D34; --warn:#E3B866; --warn-soft:#2E2618; --bad:#F08A80;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131615; --surface:#1C201F; --ink:#ECEFED; --muted:#A2AAA6; --line:#2F3533;
+  --accent:#7BB8D2; --accent-ink:#0E1A20; --accent-soft:#1D2D34; --warn:#E3B866; --warn-soft:#2E2618; --bad:#F08A80;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:Vazirmatn,Tahoma,"Segoe UI",sans-serif;font-size:15px;line-height:1.8;padding-inline:16px;padding-block:16px 48px}
+main{max-width:620px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:20px;margin:0}
+h2{font-size:16px;margin:0}
+h3{font-size:14px;margin:0}
+p{margin:0}
+.muted{color:var(--muted);font-size:13px}
+.tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;padding:4px;background:var(--line);border-radius:14px}
+.tab{min-height:44px;border:0;border-radius:10px;background:transparent;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink)}
+.stack{display:flex;flex-direction:column;gap:12px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.label{font-size:12px;font-weight:800;color:var(--warn)}
+label.f{display:flex;flex-direction:column;gap:6px;font-weight:700;font-size:13px}
+textarea,select,input[type=number]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:15px}
+textarea{min-height:90px;resize:vertical}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.seg{display:flex;gap:4px;padding:4px;background:var(--line);border-radius:12px}
+.seg button{flex:1 1 0;min-height:42px;border:0;border-radius:9px;background:transparent;color:var(--muted);font:inherit;font-size:14px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:800}
+.btn{min-height:48px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:800;font-size:15px;cursor:pointer;padding-inline:18px}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:700}
+.btn[disabled]{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row .btn{flex:1 1 150px}
+.opt{display:flex;gap:10px;align-items:flex-start;text-align:right;width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.opt[aria-checked="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.dot{flex-shrink:0;margin-top:5px;width:16px;height:16px;border-radius:50%;border:2px solid var(--muted)}
+.opt[aria-checked="true"] .dot{border:5px solid var(--accent)}
+.opt b{display:block;font-size:14px}
+.opt small{display:block;color:var(--muted);font-size:12px;line-height:1.7}
+.rec{font-size:11px;font-weight:700;padding:0 8px;border-radius:999px;background:var(--warn-soft);color:var(--warn);margin-inline-start:6px}
+.decide{background:var(--ink);color:var(--bg);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.decide strong{font-size:16px;line-height:1.7}
+.decide .btn{background:var(--bg);color:var(--ink)}
+.decide .btn.ghost{background:transparent;color:var(--bg);border-color:currentColor}
+.steps{margin:0;padding-inline-start:20px;display:flex;flex-direction:column;gap:4px}
+.steps li.cur{font-weight:800}
+.steps li.done{color:var(--muted)}
+.chip{font-size:11px;font-weight:700;padding:0 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-inline-start:6px;white-space:nowrap}
+.finding{display:flex;flex-direction:column;gap:2px;padding-block:6px;border-top:1px solid var(--line)}
+.finding:first-of-type{border-top:0}
+.ev{align-self:flex-start;font-size:11px;font-weight:800;padding:0 9px;border-radius:999px}
+.ev.FACT{background:var(--accent);color:var(--accent-ink)}
+.ev.INFERENCE{background:var(--accent-soft);color:var(--ink)}
+.ev.HYPOTHESIS{border:1px dashed var(--muted);color:var(--muted)}
+.lesson{background:var(--warn-soft);border-radius:12px;padding:12px}
+.thinking{display:flex;align-items:center;gap:10px;color:var(--muted)}
+.spin{width:18px;height:18px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+.err{color:var(--bad);font-size:14px}
+.toggle{display:flex;align-items:flex-start;gap:10px;padding-block:6px;border-top:1px solid var(--line)}
+.toggle:first-of-type{border-top:0}
+.toggle input{width:20px;height:20px;margin-top:4px;accent-color:var(--accent)}
+.toggle span{display:flex;flex-direction:column}
+.toggle small{color:var(--muted);font-size:12px}
+.prov{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-block:6px;border-top:1px solid var(--line)}
+.prov:first-of-type{border-top:0}
+.state{font-size:11px;font-weight:800;padding:1px 9px;border-radius:999px}
+.state.on{background:var(--accent);color:var(--accent-ink)}
+.state.off{border:1px solid var(--line);color:var(--muted)}
+.runs button{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:right;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+a{color:var(--accent)}
+</style>
+
+<main dir="rtl" lang="fa">
+  <header class="stack" style="gap:6px">
+    <h1>مدیر تیم</h1>
+    <p class="muted">هدفت را بده؛ مدیر برنامه می‌ریزد و در هر قدم می‌پرسد. فکرش با حساب claude.ai خودت انجام می‌شود.</p>
+  </header>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="t-run" aria-selected="true" aria-controls="p-run">مدیر</button>
+    <button class="tab" role="tab" id="t-set" aria-selected="false" aria-controls="p-set">تنظیمات</button>
+  </div>
+
+  <section id="p-run" role="tabpanel" aria-labelledby="t-run" class="stack"></section>
+
+  <section id="p-set" role="tabpanel" aria-labelledby="t-set" class="stack" hidden>
+    <div class="box">
+      <h2>مدیر</h2>
+      <label class="f" for="s-mode">حالت پیش‌فرض
+        <select id="s-mode"><option value="manual">دستی / آموزشی — در هر قدم می‌پرسد</option><option value="auto">خودکار — فقط قدم‌های پرریسک را می‌پرسد</option></select>
+      </label>
+      <label class="f" for="s-depth">عمق پیش‌فرض
+        <select id="s-depth"><option value="quick">سریع (۳ قدم)</option><option value="standard">استاندارد (۵ قدم)</option><option value="deep">عمیق (۷ قدم)</option></select>
+      </label>
+      <label class="f" for="s-max">حداکثر تعداد قدم
+        <input id="s-max" type="number" min="2" max="10" inputmode="numeric">
+      </label>
+      <label class="f" for="s-rules">قواعد اضافه برای مدیر (اختیاری)
+        <textarea id="s-rules" placeholder="مثلاً: اول بودجه را از من بپرس"></textarea>
+      </label>
+    </div>
+    <div class="box">
+      <h2>مدل</h2>
+      <div id="providers"></div>
+      <label class="f" for="s-tier-plan">سطح مدل برای برنامه‌ریزی
+        <select id="s-tier-plan"><option value="quick">سریع</option><option value="default">متعادل</option><option value="complex">قوی‌ترین</option></select>
+      </label>
+      <label class="f" for="s-tier-step">سطح مدل برای هر قدم
+        <select id="s-tier-step"><option value="quick">سریع</option><option value="default">متعادل</option><option value="complex">قوی‌ترین</option></select>
+      </label>
+      <p class="muted">کلید API هیچ‌وقت در این صفحه ذخیره نمی‌شود؛ بعداً در بک‌اند وصل می‌شود.</p>
+    </div>
+    <div class="box">
+      <h2>متخصص‌ها</h2>
+      <p class="muted">مدیر فقط از متخصص‌های روشن استفاده می‌کند.</p>
+      <div id="agents"></div>
+    </div>
+    <button class="btn" id="save">ذخیره‌ی تنظیمات</button>
+    <p class="muted" id="saveStatus" role="status"></p>
+  </section>
+
+  <p class="muted">تصمیم‌های ساخت محصول در <a href="https://claude.ai/artifact/TmYSnZ3PewBycnjQPQBXee" target="_blank" rel="noopener">دفتر تصمیم‌ها</a> ثبت می‌شوند.</p>
+</main>
+
+<script>
+(function(){
+  // ---------- config ----------
+  var AGENTS=[
+    {id:'researcher',name:'پژوهشگر بازار',desc:'اندازه و روند بازار، شواهد'},
+    {id:'customer',name:'پژوهشگر مشتری',desc:'مشتری کیست، دردش چیست'},
+    {id:'strategy',name:'استراتژی و رقابت',desc:'رقبا، تمایز، قیمت‌گذاری'},
+    {id:'product',name:'محصول',desc:'MVP، ویژگی‌ها، معیار موفقیت'},
+    {id:'builder',name:'سازنده',desc:'طرح فنی و ساخت'},
+    {id:'reviewer',name:'بازبین',desc:'نقد و کنترل کیفیت'},
+    {id:'persona',name:'کاربر مصنوعی (Persona)',desc:'نقش مشتری را بازی می‌کند و محصول را تست می‌کند'}
+  ];
+  var PROVIDERS=[
+    {id:'claude_ai',name:'claude.ai — حساب خودت',ready:true},
+    {id:'anthropic_api',name:'Anthropic API',ready:false},
+    {id:'openai_api',name:'OpenAI API',ready:false}
+  ];
+  var DEPTH_STEPS={quick:3,standard:5,deep:7};
+  var DEFAULTS={mode:'manual',depth:'standard',max_steps:6,rules:'',provider:'claude_ai',tier_plan:'default',tier_step:'default',
+    agents:{researcher:true,customer:true,strategy:true,product:true,builder:true,reviewer:true,persona:false}};
+  var TIERS={quick:'سریع',default:'متعادل',complex:'قوی‌ترین'};
+  var ERR={not_granted:'اجازه‌ی استفاده از Claude داده نشد.',sampling_disabled:'Claude برای این حساب در دسترس نیست.',
+    rate_limited:'مصرف زیاد شد؛ کمی بعد دوباره امتحان کن.',invalid_json:'جواب مدل قابل‌خواندن نبود؛ دوباره امتحان کن.',
+    refused:'مدل این درخواست را رد کرد؛ هدف را جور دیگری بنویس.',session_expired:'دوباره وارد claude.ai شو.',
+    upstream_error:'ارتباط قطع شد؛ دوباره امتحان کن.',not_connected:'این سرویس هنوز وصل نیست.'};
+
+  // ---------- state ----------
+  var settings=clone(DEFAULTS), db=null, sample=null, run=null, busy=false, ctl=null, runsList=[], lastErr='';
+  var $=function(id){return document.getElementById(id)};
+  function clone(o){return JSON.parse(JSON.stringify(o))}
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
+  function btn(text,cls,fn){var b=el('button','btn'+(cls?' '+cls:''),text);b.type='button';b.onclick=fn;b.disabled=busy;return b}
+  function agentName(id){var a=AGENTS.filter(function(x){return x.id===id})[0];return a?a.name:id}
+
+  // ---------- model gateway ----------
+  // Every call goes through here, so a backend API provider can slot in later.
+  function ask(prompt,tier){
+    var p=settings.provider||'claude_ai';
+    if(p!=='claude_ai') return Promise.reject({code:'not_connected'});
+    if(!sample) return Promise.reject({code:'sampling_disabled'});
+    ctl=new AbortController();
+    var t0=Date.now();
+    return sample.json(prompt,{modelTier:tier,cache:false,signal:ctl.signal}).then(function(data){
+      return {data:data,ms:Date.now()-t0,tier:tier,provider:p};
+    });
+  }
+
+  // ---------- prompts ----------
+  function enabledAgents(){return AGENTS.filter(function(a){return settings.agents[a.id]})}
+  function stepCount(){return Math.min(DEPTH_STEPS[run.depth]||5,Number(settings.max_steps)||6)}
+  function planPrompt(){
+    var list=enabledAgents().map(function(a){return '- '+a.id+': '+a.desc}).join('\n');
+    return 'You are the Manager of "Agent Factory", an AI venture team. Understand the user goal and plan the work.\n'
+      +'Available specialists (use only these ids, only the ones needed):\n'+list+'\n'
+      +'Plan at most '+stepCount()+' steps. Steps that do not depend on each other may share no dependency.\n'
+      +'Rules: clarify the problem first; no unnecessary specialists; never claim certainty without evidence; mark each step risk (low|medium|high): high = costly, irreversible, external or strategic.\n'
+      +(settings.rules?'Extra rules from the owner:\n'+settings.rules+'\n':'')
+      +'\nUser goal:\n'+run.goal+'\n'
+      +(run.feedback?'\nThe user asked to change the previous plan:\n'+run.feedback+'\n':'')
+      +'\nReply with ONLY JSON, every human-readable string in Persian:\n'
+      +'{"understanding":"one or two sentences","steps":[{"title":"...","agent":"researcher","goal":"what this step must find or produce","depends_on":[0],"risk":"low"}],"assumptions":["..."],"questions":["questions the user may want to answer"]}';
+  }
+  function history(){
+    return run.steps.map(function(s,i){
+      if(!s.result) return '';
+      return 'Step '+(i+1)+' ('+run.plan.steps[i].title+'), chosen path: '+s.choice+'. Lesson: '+(s.result.lesson||'')+'. Key findings: '
+        +(s.result.findings||[]).slice(0,4).map(function(f){return '['+f.type+'] '+f.claim}).join(' | ');
+    }).filter(Boolean).join('\n');
+  }
+  function checkpointPrompt(i){
+    var st=run.plan.steps[i];
+    return 'You are the Manager of an AI venture team. Goal: '+run.goal+'\n'
+      +'Plan understanding: '+run.plan.understanding+'\n'
+      +'Results so far:\n'+(history()||'(none)')+'\n'
+      +'Current step '+(i+1)+' of '+run.plan.steps.length+': "'+st.title+'" by specialist '+st.agent+'. Step goal: '+st.goal+'\n'
+      +'Build a decision checkpoint for the user: what we do not know yet, 2 to 4 concrete ways to proceed with their trade-off, which one you recommend and why.\n'
+      +'Reply with ONLY JSON, strings in Persian:\n'
+      +'{"challenge":"...","options":[{"title":"...","tradeoff":"..."}],"recommended":0,"why":"..."}';
+  }
+  function executePrompt(i){
+    var st=run.plan.steps[i], s=run.steps[i];
+    return 'You are the specialist "'+st.agent+'" in an AI venture team. Goal: '+run.goal+'\n'
+      +'Results so far:\n'+(history()||'(none)')+'\n'
+      +'Do step "'+st.title+'" ('+st.goal+') using the path the user chose: '+s.choice+'\n'
+      +(s.note?'User note: '+s.note+'\n':'')
+      +'You cannot browse or read real data. NEVER invent sources, numbers, quotes or statistics. Label every finding: FACT only for widely established general knowledge; INFERENCE for reasoning from facts; HYPOTHESIS for anything that still needs real-world validation. Suspend conclusions when evidence is thin.\n'
+      +'Reply with ONLY JSON, strings in Persian:\n'
+      +'{"action":"what was done, one sentence","findings":[{"claim":"...","type":"FACT|INFERENCE|HYPOTHESIS","basis":"why we think so"}],"lesson":"what this teaches","next":"suggested next move","open_questions":["..."]}';
+  }
+
+  // ---------- persistence ----------
+  function saveRun(){
+    if(!db||!run) return Promise.resolve();
+    run.updated_at=new Date().toISOString();
+    return db.doc('runs/'+run.id).set(clone(run)).catch(function(e){lastErr='اجرا ذخیره نشد ('+(e&&e.code)+').'});
+  }
+  function newId(){return 'r'+Date.now().toString(36)}
+
+  // ---------- actions ----------
+  function fail(e){busy=false;lastErr=(e&&e.code==='cancelled')?'':(ERR[e&&e.code]||('خطا: '+(e&&e.code||'نامشخص')));render()}
+  function start(goal,mode,depth){
+    run={id:newId(),goal:goal,mode:mode,depth:depth,status:'planning',plan:null,feedback:'',cursor:0,steps:[],calls:[],created_at:new Date().toISOString()};
+    makePlan();
+  }
+  function makePlan(){
+    busy=true;lastErr='';run.status='planning';render();
+    ask(planPrompt(),settings.tier_plan).then(function(r){
+      var d=r.data||{};
+      if(!Array.isArray(d.steps)||!d.steps.length) throw {code:'invalid_json'};
+      d.steps=d.steps.slice(0,stepCount());
+      run.plan=d;run.status='plan_review';run.steps=d.steps.map(function(){return {}});
+      run.calls.push({kind:'plan',ms:r.ms,tier:r.tier,provider:r.provider});
+      busy=false;render();return saveRun();
+    }).catch(function(e){run.status='new_plan_failed';fail(e)});
+  }
+  function checkpoint(){
+    var i=run.cursor;busy=true;lastErr='';run.status='checkpoint_loading';render();
+    ask(checkpointPrompt(i),settings.tier_step).then(function(r){
+      var d=r.data||{};
+      if(!Array.isArray(d.options)||!d.options.length) throw {code:'invalid_json'};
+      var rec=Math.max(0,Math.min(d.options.length-1,Number(d.recommended)||0));
+      d.recommended=rec;
+      run.steps[i].checkpoint=d;run.steps[i].picked=rec;
+      run.calls.push({kind:'checkpoint',step:i,ms:r.ms,tier:r.tier,provider:r.provider});
+      busy=false;
+      var risk=run.plan.steps[i].risk;
+      if(run.mode==='auto'&&risk!=='high'){run.steps[i].choice=d.options[rec].title;run.steps[i].auto=true;execute();}
+      else{run.status='checkpoint';render();saveRun();}
+    }).catch(function(e){run.status='checkpoint_failed';fail(e)});
+  }
+  function execute(){
+    var i=run.cursor;busy=true;lastErr='';run.status='executing';render();
+    ask(executePrompt(i),settings.tier_step).then(function(r){
+      var d=r.data||{};
+      d.findings=(Array.isArray(d.findings)?d.findings:[]).map(function(f){
+        var t=String(f.type||'').toUpperCase();return {claim:f.claim,type:(t==='FACT'||t==='INFERENCE')?t:'HYPOTHESIS',basis:f.basis};
+      });
+      run.steps[i].result=d;
+      run.calls.push({kind:'execute',step:i,ms:r.ms,tier:r.tier,provider:r.provider});
+      run.status=(i>=run.plan.steps.length-1)?'done':'result';
+      busy=false;render();return saveRun();
+    }).catch(function(e){run.status='execute_failed';fail(e)});
+  }
+
+  // ---------- views ----------
+  function thinking(text){
+    var b=el('div','box');var t=el('div','thinking');t.appendChild(el('span','spin'));t.appendChild(el('span',null,text));b.appendChild(t);
+    var s=el('button','btn ghost','توقف');s.type='button';s.onclick=function(){if(ctl)ctl.abort()};b.appendChild(s);return b;
+  }
+  function segment(items,value,onPick,label){
+    var g=el('div','seg');g.setAttribute('role','group');g.setAttribute('aria-label',label);
+    items.forEach(function(it){var b=el('button',null,it[1]);b.type='button';b.setAttribute('aria-pressed',String(it[0]===value));b.onclick=function(){onPick(it[0])};g.appendChild(b)});
+    return g;
+  }
+  var draft={goal:'',mode:null,depth:null};
+  function viewStart(p){
+    if(draft.mode===null){draft.mode=settings.mode;draft.depth=settings.depth}
+    var box=el('div','stack');
+    var lab=el('label','f','هدف یا ایده‌ات');lab.setAttribute('for','goal');
+    var ta=el('textarea');ta.id='goal';ta.placeholder='مثلاً: می‌خواهم بدانم یک SaaS برای کسب‌وکارهای کوچک ارزش ساختن دارد یا نه';ta.value=draft.goal;
+    ta.oninput=function(){draft.goal=ta.value};lab.appendChild(ta);box.appendChild(lab);
+    box.appendChild(el('h3',null,'حالت'));
+    box.appendChild(segment([['manual','دستی / آموزشی'],['auto','خودکار']],draft.mode,function(v){draft.mode=v;render()},'حالت'));
+    box.appendChild(el('h3',null,'عمق'));
+    box.appendChild(segment([['quick','سریع'],['standard','استاندارد'],['deep','عمیق']],draft.depth,function(v){draft.depth=v;render()},'عمق'));
+    box.appendChild(btn('برنامه بریز',null,function(){
+      var g=draft.goal.trim();if(!g){lastErr='اول هدفت را بنویس.';render();return}
+      start(g,draft.mode,draft.depth);
+    }));
+    if(!sample) box.appendChild(el('p','err','Claude در این نما در دسترس نیست؛ صفحه را از داخل claude.ai باز کن.'));
+    p.appendChild(box);
+    if(runsList.length){
+      var r=el('div','box runs');r.appendChild(el('h3',null,'اجراهای قبلی'));
+      runsList.forEach(function(x){
+        var b=el('button');b.type='button';
+        b.appendChild(el('span',null,x.goal.length>48?x.goal.slice(0,48)+'…':x.goal));
+        b.appendChild(el('span','chip',x.status==='done'?'تمام شد':'نیمه‌کاره'));
+        b.onclick=function(){run=clone(x);lastErr='';render()};r.appendChild(b);
+      });
+      p.appendChild(r);
+    }
+  }
+  function planOutline(){
+    var ol=el('ol','steps');
+    run.plan.steps.forEach(function(s,i){
+      var li=el('li',i===run.cursor&&run.status!=='plan_review'?'cur':(run.steps[i]&&run.steps[i].result?'done':''));
+      li.appendChild(document.createTextNode(s.title));
+      li.appendChild(el('span','chip',agentName(s.agent)));
+      if(s.risk==='high') li.appendChild(el('span','rec','پرریسک'));
+      ol.appendChild(li);
+    });
+    return ol;
+  }
+  function viewPlan(p){
+    var b=el('div','box');b.appendChild(el('span','label','مدیر: هدفت را این‌طور فهمیدم'));b.appendChild(el('p',null,run.plan.understanding));p.appendChild(b);
+    var s=el('div','box');s.appendChild(el('h2',null,'برنامه'));s.appendChild(planOutline());p.appendChild(s);
+    if((run.plan.assumptions||[]).length){var a=el('div','box');a.appendChild(el('h3',null,'فرض‌ها'));run.plan.assumptions.forEach(function(x){a.appendChild(el('p','muted','• '+x))});p.appendChild(a)}
+    if((run.plan.questions||[]).length){var q=el('div','box');q.appendChild(el('h3',null,'سؤال‌هایی که شاید بخواهی جواب بدهی'));run.plan.questions.forEach(function(x){q.appendChild(el('p','muted','• '+x))});p.appendChild(q)}
+    var lab=el('label','f','اگر برنامه را قبول نداری، بنویس چه چیزی عوض شود');lab.setAttribute('for','fb');
+    var ta=el('textarea');ta.id='fb';ta.style.minHeight='64px';lab.appendChild(ta);p.appendChild(lab);
+    var d=el('div','decide');d.appendChild(el('span','label','قبل از شروع، تأیید تو لازم است'));
+    d.appendChild(el('strong',null,'این مسیر را می‌رویم: '+run.plan.steps.length+' قدم، از «'+run.plan.steps[0].title+'».'));
+    var row=el('div','row');
+    row.appendChild(btn('تأیید — برویم',null,function(){run.cursor=0;checkpoint()}));
+    row.appendChild(btn('برنامه را عوض کن','ghost',function(){var f=ta.value.trim();if(!f){lastErr='بنویس چه چیزی عوض شود.';render();return}run.feedback=f;makePlan()}));
+    d.appendChild(row);p.appendChild(d);
+  }
+  function viewCheckpoint(p){
+    var i=run.cursor,st=run.plan.steps[i],s=run.steps[i],c=s.checkpoint;
+    p.appendChild(el('p','muted','قدم '+(i+1)+' از '+run.plan.steps.length+' · '+st.title+' · '+agentName(st.agent)));
+    var b=el('div','box');b.appendChild(el('span','label','چالش'));b.appendChild(el('strong',null,c.challenge));p.appendChild(b);
+    p.appendChild(el('h2',null,'چند راه داریم. تو کدام را می‌روی؟'));
+    var g=el('div','stack');g.style.gap='8px';g.setAttribute('role','radiogroup');
+    c.options.forEach(function(o,k){
+      var x=el('button','opt');x.type='button';x.setAttribute('role','radio');x.setAttribute('aria-checked',String(k===s.picked));
+      x.appendChild(el('span','dot'));var t=el('span');var h=el('b',null,o.title);if(k===c.recommended)h.appendChild(el('span','rec','پیشنهاد مدیر'));
+      t.appendChild(h);t.appendChild(el('small',null,o.tradeoff));x.appendChild(t);
+      x.onclick=function(){s.picked=k;render()};g.appendChild(x);
+    });
+    p.appendChild(g);
+    var w=el('div','box');w.appendChild(el('span','label','چرا مدیر این را پیشنهاد می‌کند؟'));w.appendChild(el('p',null,c.why));p.appendChild(w);
+    var lab=el('label','f','سؤال یا نکته‌ات برای این قدم (اختیاری)');lab.setAttribute('for','note');
+    var ta=el('textarea');ta.id='note';ta.style.minHeight='60px';ta.value=s.note||'';ta.oninput=function(){s.note=ta.value};lab.appendChild(ta);p.appendChild(lab);
+    var d=el('div','decide');d.appendChild(el('span','label','تصمیم این قدم'));
+    d.appendChild(el('strong',null,'این مسیر را می‌رویم: '+c.options[s.picked].title));
+    if(s.picked!==c.recommended) d.appendChild(el('p',null,'مسیر خودت را انتخاب کردی؛ مدیر با همین جلو می‌رود.'));
+    d.appendChild(btn('تأیید و اجرا',null,function(){s.choice=c.options[s.picked].title;execute()}));
+    p.appendChild(d);
+  }
+  function viewResult(p){
+    var i=run.cursor,st=run.plan.steps[i],s=run.steps[i],r=s.result;
+    p.appendChild(el('p','muted','قدم '+(i+1)+' از '+run.plan.steps.length+' · '+st.title+' · نتیجه'));
+    var a=el('div','box');a.appendChild(el('span','label','مسیر: '+s.choice+(s.auto?' (خودکار)':'')));a.appendChild(el('p',null,r.action));p.appendChild(a);
+    var f=el('div','box');f.appendChild(el('h2',null,'یافته‌ها'));
+    var lab={FACT:'واقعیت',INFERENCE:'استنباط',HYPOTHESIS:'فرضیه'};
+    r.findings.forEach(function(x){var row=el('div','finding');row.appendChild(el('span','ev '+x.type,lab[x.type]));row.appendChild(el('span',null,x.claim));if(x.basis)row.appendChild(el('small','muted',x.basis));f.appendChild(row)});
+    f.appendChild(el('p','muted','بدون جستجوی وب؛ یافته‌ها از دانش مدل‌اند و فرضیه‌ها باید با داده‌ی واقعی سنجیده شوند.'));
+    p.appendChild(f);
+    if(r.lesson){var l=el('div','lesson');l.appendChild(el('b',null,'درسی که گرفتیم: '));l.appendChild(document.createTextNode(r.lesson));p.appendChild(l)}
+    if((r.open_questions||[]).length){var q=el('div','box');q.appendChild(el('h3',null,'سؤال‌های باز'));r.open_questions.forEach(function(x){q.appendChild(el('p','muted','• '+x))});p.appendChild(q)}
+    var d=el('div','decide');
+    if(run.status==='done'){
+      d.appendChild(el('span','label','همه‌ی قدم‌ها انجام شد'));
+      d.appendChild(el('strong',null,r.next?('پیشنهاد مدیر برای بعد: '+r.next):'برنامه تمام شد.'));
+      d.appendChild(btn('هدف تازه',null,function(){run=null;draft={goal:'',mode:null,depth:null};render()}));
+    }else{
+      var nx=run.plan.steps[i+1];
+      d.appendChild(el('span','label','قدم بعد · '+(i+2)+' از '+run.plan.steps.length));
+      d.appendChild(el('strong',null,nx.title+' — '+agentName(nx.agent)));
+      d.appendChild(el('p',null,'این مسیر را برویم؟'));
+      var row=el('div','row');
+      row.appendChild(btn('بله، این مسیر را می‌رویم',null,function(){run.cursor=i+1;checkpoint()}));
+      row.appendChild(btn('فعلاً صبر کن','ghost',function(){saveRun();run=null;render()}));
+      d.appendChild(row);
+    }
+    p.appendChild(d);
+  }
+  function viewRetry(p,text,fn){
+    var b=el('div','box');b.appendChild(el('p','err',lastErr||text));
+    var row=el('div','row');row.appendChild(btn('دوباره امتحان کن',null,fn));
+    row.appendChild(btn('برگرد به شروع','ghost',function(){run=null;lastErr='';render()}));b.appendChild(row);p.appendChild(b);
+  }
+  function render(){
+    var p=$('p-run');p.innerHTML='';
+    if(run&&run.plan&&run.status!=='plan_review'){var o=el('div','box');o.appendChild(el('h3',null,run.goal));o.appendChild(planOutline());p.appendChild(o)}
+    if(!run){viewStart(p)}
+    else if(run.status==='planning') p.appendChild(thinking('مدیر دارد برنامه می‌ریزد… (ممکن است تا یک دقیقه طول بکشد)'));
+    else if(run.status==='new_plan_failed') viewRetry(p,'برنامه ساخته نشد.',makePlan);
+    else if(run.status==='plan_review') viewPlan(p);
+    else if(run.status==='checkpoint_loading') p.appendChild(thinking('مدیر دارد گزینه‌های این قدم را آماده می‌کند…'));
+    else if(run.status==='checkpoint_failed') viewRetry(p,'گزینه‌ها آماده نشد.',checkpoint);
+    else if(run.status==='checkpoint') viewCheckpoint(p);
+    else if(run.status==='executing') p.appendChild(thinking(agentName(run.plan.steps[run.cursor].agent)+' دارد کار می‌کند…'));
+    else if(run.status==='execute_failed') viewRetry(p,'اجرای قدم انجام نشد.',execute);
+    else if(run.status==='result'||run.status==='done') viewResult(p);
+    if(lastErr&&run&&!/failed/.test(run.status)) p.appendChild(el('p','err',lastErr));
+    if(lastErr&&!run) p.appendChild(el('p','err',lastErr));
+  }
+
+  // ---------- settings ----------
+  function fillSettings(){
+    $('s-mode').value=settings.mode;$('s-depth').value=settings.depth;$('s-max').value=settings.max_steps;$('s-rules').value=settings.rules||'';
+    $('s-tier-plan').value=settings.tier_plan;$('s-tier-step').value=settings.tier_step;
+    var pv=$('providers');pv.innerHTML='';
+    PROVIDERS.forEach(function(x){
+      var r=el('label','prov');var left=el('span');left.style.display='flex';left.style.gap='8px';left.style.alignItems='center';
+      var i=el('input');i.type='radio';i.name='prov';i.value=x.id;i.checked=settings.provider===x.id;i.disabled=!x.ready;i.style.width='18px';i.style.height='18px';
+      left.appendChild(i);left.appendChild(el('span',null,x.name));r.appendChild(left);
+      r.appendChild(el('span','state '+(x.ready?'on':'off'),x.ready?'وصل':'بعداً — نیاز به کلید در بک‌اند'));pv.appendChild(r);
+    });
+    var ag=$('agents');ag.innerHTML='';
+    AGENTS.forEach(function(a){
+      var r=el('label','toggle');var i=el('input');i.type='checkbox';i.id='ag-'+a.id;i.checked=!!settings.agents[a.id];
+      r.appendChild(i);var t=el('span');t.appendChild(el('b',null,a.name));t.appendChild(el('small',null,a.desc));r.appendChild(t);ag.appendChild(r);
+    });
+  }
+  $('save').onclick=function(){
+    var s=clone(settings);
+    s.mode=$('s-mode').value;s.depth=$('s-depth').value;
+    s.max_steps=Math.max(2,Math.min(10,parseInt($('s-max').value,10)||6));
+    s.rules=$('s-rules').value.trim();s.tier_plan=$('s-tier-plan').value;s.tier_step=$('s-tier-step').value;
+    var pr=document.querySelector('input[name=prov]:checked');s.provider=pr?pr.value:'claude_ai';
+    AGENTS.forEach(function(a){s.agents[a.id]=$('ag-'+a.id).checked});
+    if(!AGENTS.some(function(a){return s.agents[a.id]})){$('saveStatus').textContent='دست‌کم یک متخصص باید روشن باشد.';return}
+    settings=s;draft.mode=null;
+    if(!db){$('saveStatus').textContent='فقط برای همین بار اعمال شد (ذخیره در دسترس نیست).';return}
+    $('save').disabled=true;$('saveStatus').textContent='در حال ذخیره…';
+    db.doc('settings/main').set(clone(s)).then(function(){$('saveStatus').textContent='ذخیره شد.'})
+      .catch(function(e){$('saveStatus').textContent='ذخیره نشد ('+(e&&e.code)+').'})
+      .then(function(){$('save').disabled=false});
+  };
+
+  // ---------- tabs ----------
+  function tab(which){
+    $('t-run').setAttribute('aria-selected',String(which==='run'));$('t-set').setAttribute('aria-selected',String(which==='set'));
+    $('p-run').hidden=which!=='run';$('p-set').hidden=which!=='set';
+  }
+  $('t-run').onclick=function(){tab('run')};$('t-set').onclick=function(){tab('set')};
+
+  // ---------- boot ----------
+  fillSettings();render();
+  claude.use('sample').then(function(s){sample=s;if(!run)render()});
+  claude.use('db').then(function(d){
+    db=d;if(!db)return;
+    db.doc('settings/main').onSnapshot(function(snap){
+      if(snap.exists){var v=snap.data();settings=Object.assign(clone(DEFAULTS),v);settings.agents=Object.assign(clone(DEFAULTS.agents),v.agents||{});fillSettings();if(!run)render()}
+    },function(){});
+    db.collection('runs').orderBy('updated_at','desc').limit(5).onSnapshot(function(snap){
+      runsList=snap.docs.map(function(x){return x.data()}).filter(function(x){return x&&x.goal});
+      if(!run)render();
+    },function(){});
+  });
+})();
+</script>
