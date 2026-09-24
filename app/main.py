@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.db import Base, SessionLocal, engine
 from app.registry import sync_from_files
-from app.routers import agents, projects, settings, tasks, users
+from app.routers import agents, manager, projects, settings, tasks, users
 
 
 @asynccontextmanager
@@ -20,6 +20,7 @@ app = FastAPI(title="Agent Factory", version="0.2.0", lifespan=lifespan)
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
+app.include_router(manager.router)
 app.include_router(settings.router)
 app.include_router(agents.router)
 
