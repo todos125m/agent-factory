@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -r
 COPY pyproject.toml ./
 COPY app ./app
 COPY registry ./registry
+COPY web ./web
 
 RUN pip install --no-cache-dir -e ".[postgres,anthropic]"
 

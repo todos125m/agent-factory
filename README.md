@@ -29,13 +29,14 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
+| UI shell | Static app shell — sidebar, top bar, empty dashboard, placeholder sections | ⏳ started (`web/index.html`, served at `/app`) |
 
 ## Run locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload     # http://localhost:8000/docs
+uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost:8000/app for the UI
 pytest
 ```
 
