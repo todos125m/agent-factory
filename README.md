@@ -18,10 +18,11 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 — Foundation | API, DB, User / Project, Task graph, task state machine, event log | ✅ |
+| Infra | Layered settings, agent & skill registry, model gateway with token/cost tracking and budgets, context builder | ✅ |
 | 2 — Manager | Planner, approval gate, mode engine | ⏳ next |
-| 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | |
+| 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
 | 4 — First Agents | Research, Customer, Strategy, Product | |
-| 5 — Model Gateway | Provider abstraction, routing, cost tracking | |
+| 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
 | 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
 | 7 — Memory | Project state, decisions, retrieval, learning memory | |
 | 8 — Learning UX | Learning Trace, Ask Why, Try It Myself | |
@@ -53,6 +54,22 @@ Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `
 | POST | `/projects/{id}/tasks` | Create task with `depends_on` (DAG) |
 | GET  | `/projects/{id}/tasks/runnable` | Tasks whose dependencies are done — safe to run in parallel |
 | POST | `/projects/{id}/tasks/{tid}/transition` | Move task through the state machine |
+
+## Infrastructure API
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/workspaces` | Create workspace |
+| GET/PUT | `/settings/{global\|workspace\|project\|task}/{id}` | Read / replace one settings layer (global id = 0) |
+| GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project ← task |
+| GET | `/agents`, `/agents/{name}`, `?capability=` | Agent registry; POST `/agents` registers after validation |
+| GET | `/skills`, `/skills/{name}` | Skills (summary / full body) |
+| GET | `/projects/{id}/usage` | Tokens, cost and budget for a project |
+
+Agents and skills are defined as files in `registry/` and synced at startup.
+Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
+every call logged with tokens and cost). `app/context.py` builds the smallest prompt a call needs.
+Set `ANTHROPIC_API_KEY` and `pip install -e ".[anthropic]"` to use Claude.
 
 Task states: `CREATED → READY → RUNNING → (WAITING) → COMPLETED → REVIEWED`, with
 `FAILED → READY` (retry, bounded by `max_retries`) or `→ ESCALATED`, and `COMPLETED → READY`

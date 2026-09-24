@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import settings_layers
 from app.db import get_session
 from app.events import record_event
-from app.models import Project, RunEvent, User
-from app.schemas import ProjectCreate, ProjectOut, ProjectPauseUpdate, ProjectStageUpdate, RunEventOut
+from app.models import ModelCall, Project, RunEvent, User, Workspace
+from app.schemas import ProjectCreate, ProjectOut, ProjectPauseUpdate, ProjectStageUpdate, RunEventOut, UsageOut
 from app.state_machine import TransitionError, check_project_advance
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -22,6 +23,8 @@ def load_project(session: Session, project_id: int) -> Project:
 def create_project(body: ProjectCreate, session: Session = Depends(get_session)):
     if not session.get(User, body.owner_id):
         raise HTTPException(404, "Owner not found")
+    if body.workspace_id is not None and not session.get(Workspace, body.workspace_id):
+        raise HTTPException(404, "Workspace not found")
     project = Project(**body.model_dump())
     session.add(project)
     session.flush()
@@ -72,3 +75,22 @@ def set_paused(project_id: int, body: ProjectPauseUpdate, session: Session = Dep
 def list_events(project_id: int, session: Session = Depends(get_session)):
     load_project(session, project_id)
     return session.scalars(select(RunEvent).where(RunEvent.project_id == project_id).order_by(RunEvent.id)).all()
+
+
+@router.get("/{project_id}/usage", response_model=UsageOut)
+def project_usage(project_id: int, session: Session = Depends(get_session)):
+    load_project(session, project_id)
+    row = session.execute(
+        select(
+            func.count(ModelCall.id),
+            func.coalesce(func.sum(ModelCall.input_tokens), 0),
+            func.coalesce(func.sum(ModelCall.output_tokens), 0),
+            func.coalesce(func.sum(ModelCall.cache_read_tokens), 0),
+            func.coalesce(func.sum(ModelCall.cost_usd), 0.0),
+        ).where(ModelCall.project_id == project_id)
+    ).one()
+    budget = settings_layers.resolve(session, project_id=project_id)["budget"]["project_usd"]
+    return UsageOut(
+        calls=row[0], input_tokens=row[1], output_tokens=row[2], cache_read_tokens=row[3],
+        cost_usd=round(float(row[4]), 6), budget_usd=float(budget),
+    )

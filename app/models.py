@@ -1,7 +1,8 @@
-"""Phase 1 data model (docs/ARCHITECTURE.md §22, §23, §40, §50).
+"""Data model (docs/ARCHITECTURE.md §10, §22, §23, §31, §40, §50).
 
-Only the foundation entities live here: User, Project, Task, TaskDependency, RunEvent.
-Agent registry, approvals, learning traces, etc. arrive in later phases.
+Foundation: User, Workspace, Project, Task, TaskDependency, RunEvent.
+Infrastructure: SettingsLayer, Agent, Skill, ModelCall.
+Approvals, learning traces and memory arrive in later phases.
 """
 
 import enum
@@ -62,11 +63,20 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    workspace_id: Mapped[int | None] = mapped_column(ForeignKey("workspaces.id"))
     title: Mapped[str] = mapped_column(String(300))
     goal: Mapped[str] = mapped_column(Text)
     mode: Mapped[Mode] = mapped_column(Enum(Mode), default=Mode.AUTOMATIC)
@@ -126,4 +136,77 @@ class RunEvent(Base):
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     type: Mapped[str] = mapped_column(String(100))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SettingsScope(str, enum.Enum):
+    GLOBAL = "global"
+    WORKSPACE = "workspace"
+    PROJECT = "project"
+    TASK = "task"
+
+
+class SettingsLayer(Base):
+    """One layer of settings; lower scopes override higher ones (see app/settings_layers.py)."""
+
+    __tablename__ = "settings_layers"
+    __table_args__ = (UniqueConstraint("scope", "scope_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope: Mapped[SettingsScope] = mapped_column(Enum(SettingsScope))
+    scope_id: Mapped[int] = mapped_column(Integer, default=0)  # 0 for the global layer
+    values: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Skill(Base):
+    """A unit of know-how an agent can load on demand. Only `summary` sits in the prompt by default."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    summary: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+
+
+class Agent(Base):
+    """Agent Registry entry (docs/ARCHITECTURE.md §10)."""
+
+    __tablename__ = "agents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    description: Mapped[str] = mapped_column(Text)
+    model_role: Mapped[str] = mapped_column(String(50))
+    capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    tools: Mapped[list[str]] = mapped_column(JSON, default=list)
+    permissions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    skills: Mapped[list[str]] = mapped_column(JSON, default=list)
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(default=True)
+
+
+class ModelCall(Base):
+    """Every model call, for token/cost tracking and budgets (§31, §34)."""
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    agent: Mapped[str | None] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(50))
+    provider: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    ok: Mapped[bool] = mapped_column(default=True)
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import Mode, ProjectStage, RiskLevel, TaskStatus
+from app.models import Mode, ProjectStage, RiskLevel, SettingsScope, TaskStatus
 
 
 class ORM(BaseModel):
@@ -24,6 +24,7 @@ class UserOut(ORM):
 
 class ProjectCreate(BaseModel):
     owner_id: int
+    workspace_id: int | None = None
     title: str
     goal: str
     mode: Mode = Mode.AUTOMATIC
@@ -33,6 +34,7 @@ class ProjectCreate(BaseModel):
 class ProjectOut(ORM):
     id: int
     owner_id: int
+    workspace_id: int | None
     title: str
     goal: str
     mode: Mode
@@ -94,3 +96,53 @@ class RunEventOut(ORM):
     type: str
     payload: dict[str, Any]
     created_at: datetime
+
+
+class WorkspaceCreate(BaseModel):
+    name: str
+
+
+class WorkspaceOut(ORM):
+    id: int
+    name: str
+    created_at: datetime
+
+
+class SettingsLayerOut(BaseModel):
+    scope: SettingsScope
+    scope_id: int
+    values: dict[str, Any]
+
+
+class SkillOut(ORM):
+    name: str
+    version: int
+    summary: str
+    body: str
+
+
+class SkillSummary(ORM):
+    name: str
+    version: int
+    summary: str
+
+
+class AgentOut(ORM):
+    name: str
+    version: int
+    description: str
+    model_role: str
+    capabilities: list[str]
+    tools: list[str]
+    permissions: dict[str, Any]
+    skills: list[str]
+    active: bool
+
+
+class UsageOut(BaseModel):
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    budget_usd: float

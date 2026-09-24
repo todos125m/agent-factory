@@ -5,7 +5,12 @@
 - `docs/AGENT_PRINCIPLES.md` defines the six engines (Persona, Knowledge Boundary, Action, Observation, Memory,
   Synthesis). They apply in full only to the dedicated Persona Agent (simulated user). Specialist agents take
   only Synthesis (suspend conclusions until evidence supports them) and Memory.
-- Model gateway must support multiple providers from the start (owner's decision); no agent names a model ID.
+- All model calls go through `app/gateway` (never a provider SDK directly). Agents name a role; settings map
+  role → provider/model. Every call is budget-checked and logged in `ModelCall`.
+- Token discipline (owner's hard requirement): deterministic logic stays in code; load only the skills an
+  action needs (`context.system_prompt`); keep system prompts stable for caching; pass dependency summaries,
+  not histories (`context.task_context`); cap output tokens via settings.
+- Agents and skills live as files in `registry/`; keep skills short.
 - Every product decision is logged in the owner's decision-log artifact; ask the owner before each step and
   state the chosen path ("این مسیر را می‌رویم").
 - Respect §53 ("what not to build in V1"): no Kubernetes, no microservices, no free agent-to-agent calls,
