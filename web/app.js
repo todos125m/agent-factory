@@ -14,7 +14,7 @@ var RISK_FA = {low:'کم', medium:'متوسط', high:'پرریسک'};
 var APPROVAL_FA = {auto:'خودکار', manager:'مدیر', user:'کاربر'};
 var MODEL_ROLES = ['manager','research','coding','cheap'];
 var ROLE_FA = {manager:'مدیر', research:'پژوهش', coding:'کدنویسی', cheap:'ارزان'};
-var PROVIDERS = ['anthropic','openai'];
+var PROVIDERS = ['anthropic','claude_account','openai'];
 
 /* ============================== api client ============================== */
 
