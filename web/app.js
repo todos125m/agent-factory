@@ -676,9 +676,13 @@ function renderSettings(root){
         scopeExtra.appendChild(el('label', {class:'f'}, 'پروژه', psel));
         scopeExtra.appendChild(el('label', {class:'f'}, 'وظیفه', tsel));
         function loadTasks(){
-          clear(tsel);
+          clear(tsel); clear(body);
           api('/projects/' + psel.value + '/tasks').then(function(ts){
-            if (!ts.length){ tsel.appendChild(el('option', {value:''}, '(وظیفه‌ای نیست)')); return; }
+            if (!ts.length){
+              tsel.appendChild(el('option', {value:''}, '(وظیفه‌ای نیست)'));
+              body.appendChild(el('p', {class:'muted', text:'این پروژه هنوز وظیفه‌ای ندارد.'}));
+              return;
+            }
             ts.forEach(function(t){ tsel.appendChild(el('option', {value:t.id}, t.title)); });
             scopeId = Number(tsel.value); loadLayer();
           });
@@ -722,10 +726,14 @@ function renderSettings(root){
       });
       return el('label', {class:'f'}, label, input);
     }
+    function faLabel(faMap, v){
+      if (v === null || v === undefined || v === '') return '—';
+      return faMap[v] || v;
+    }
     function selectField(path, label, options, faMap){
       var cur = getPath(overrides, path);
       var sel = el('select', {});
-      sel.appendChild(el('option', {value:''}, 'به ارث می‌رسد (' + (faMap[getPath(resolved, path)] || getPath(resolved, path)) + ')'));
+      sel.appendChild(el('option', {value:''}, 'به ارث می‌رسد (' + faLabel(faMap, getPath(resolved, path)) + ')'));
       options.forEach(function(o){ sel.appendChild(el('option', {value:o}, faMap[o] || o)); });
       sel.value = cur !== undefined ? cur : '';
       sel.addEventListener('change', function(){
