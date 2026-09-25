@@ -37,6 +37,14 @@ def test_settings_reject_unknown_keys_and_scopes(client, project):
     assert client.put("/settings/project/999", json={}).status_code == 404
 
 
+def test_list_workspaces(client):
+    assert client.get("/workspaces").json() == []
+    client.post("/workspaces", json={"name": "Acme"})
+    client.post("/workspaces", json={"name": "Beta"})
+    names = [w["name"] for w in client.get("/workspaces").json()]
+    assert names == ["Acme", "Beta"]
+
+
 # ---------- registry ----------
 
 
@@ -105,6 +113,16 @@ def test_budget_blocks_the_call_and_records_event(session, client):
     assert fake.requests == []  # nothing was sent
     events = client.get(f"/projects/{project.id}/events").json()
     assert events[-1]["type"] == "budget.exceeded"
+
+
+def test_list_model_calls_for_a_project(session, client):
+    project = make_project(session)
+    gw, fake = use_fake(session, replies=[{"steps": []}])
+    gw.call("manager", system="s", user="u", project_id=project.id, agent="manager", json_schema={"type": "object"})
+    calls = client.get(f"/projects/{project.id}/model_calls").json()
+    assert len(calls) == 1
+    assert calls[0]["agent"] == "manager" and calls[0]["provider"] == "fake" and calls[0]["ok"] is True
+    assert client.get("/projects/999/model_calls").status_code == 404
 
 
 def test_failed_call_is_logged_and_unconfigured_provider_errors(session):

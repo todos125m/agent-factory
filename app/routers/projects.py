@@ -6,7 +6,7 @@ from app import settings_layers
 from app.db import get_session
 from app.events import record_event
 from app.models import ModelCall, Project, RunEvent, User, Workspace
-from app.schemas import ProjectCreate, ProjectOut, ProjectPauseUpdate, ProjectStageUpdate, RunEventOut, UsageOut
+from app.schemas import ModelCallOut, ProjectCreate, ProjectOut, ProjectPauseUpdate, ProjectStageUpdate, RunEventOut, UsageOut
 from app.state_machine import TransitionError, check_project_advance
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -94,3 +94,11 @@ def project_usage(project_id: int, session: Session = Depends(get_session)):
         calls=row[0], input_tokens=row[1], output_tokens=row[2], cache_read_tokens=row[3],
         cost_usd=round(float(row[4]), 6), budget_usd=float(budget),
     )
+
+
+@router.get("/{project_id}/model_calls", response_model=list[ModelCallOut])
+def list_model_calls(project_id: int, session: Session = Depends(get_session)):
+    load_project(session, project_id)
+    return session.scalars(
+        select(ModelCall).where(ModelCall.project_id == project_id).order_by(ModelCall.id.desc())
+    ).all()

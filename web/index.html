@@ -5,60 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Factory</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&display=swap">
-<style>
-:root{
-  --bg:#F3F5F4; --surface:#FFFFFF; --sidebar:#1A1D1C; --sidebar-ink:#ECEFED; --sidebar-muted:#9AA3A0;
-  --ink:#1A1D1C; --muted:#5A615E; --line:#D9DEDB;
-  --accent:#1D5F7A; --accent-ink:#FFFFFF; --accent-soft:#E2EDF1;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#0F1211; --surface:#1C201F; --sidebar:#131615; --sidebar-ink:#ECEFED; --sidebar-muted:#7B8481;
-    --ink:#ECEFED; --muted:#A2AAA6; --line:#2F3533;
-    --accent:#7BB8D2; --accent-ink:#0E1A20; --accent-soft:#1D2D34;
-    color-scheme:dark;
-  }
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Vazirmatn,Tahoma,"Segoe UI",sans-serif;font-size:15px;line-height:1.8}
-.shell{display:flex;min-height:100vh}
-
-.sidebar{width:220px;flex-shrink:0;background:var(--sidebar);color:var(--sidebar-ink);display:flex;flex-direction:column;padding:16px 12px;gap:16px}
-.brand{display:flex;flex-direction:column;gap:2px;padding:8px 10px}
-.brand b{font-size:15px}
-.brand span{font-size:12px;color:var(--sidebar-muted)}
-.nav{display:flex;flex-direction:column;gap:2px}
-.nav-item{display:flex;align-items:center;gap:10px;min-height:44px;padding-inline:10px;border:0;border-radius:10px;background:transparent;color:var(--sidebar-muted);font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:right;width:100%}
-.nav-item .ic{font-size:16px;width:20px;text-align:center}
-.nav-item:hover{background:rgba(255,255,255,.06);color:var(--sidebar-ink)}
-.nav-item[aria-current="page"]{background:var(--accent);color:var(--accent-ink)}
-
-.main{flex:1 1 auto;display:flex;flex-direction:column;min-width:0}
-.topbar{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--surface)}
-.topbar input{flex:1 1 auto;max-width:360px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:14px}
-.icon-btn{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:16px;cursor:pointer}
-.spacer{flex:1 1 auto}
-.avatar{width:36px;height:36px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
-
-main{padding:24px;flex:1 1 auto}
-.page{display:none;max-width:960px}
-.page[aria-current="page"]{display:block}
-.page h1{font-size:20px;margin:0 0 4px}
-.page .muted{color:var(--muted);font-size:13px;margin:0 0 20px}
-
-.empty-state,.soon-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:48px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;color:var(--muted)}
-.empty-state .ic,.soon-card .ic{font-size:34px}
-.empty-state b,.soon-card b{color:var(--ink);font-size:16px}
-.badge{display:inline-block;font-size:11px;font-weight:800;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:3px 10px;margin-top:2px}
-
-@media (max-width: 720px){
-  .shell{flex-direction:column}
-  .sidebar{width:100%;flex-direction:row;overflow-x:auto;padding:8px}
-  .nav{flex-direction:row}
-  .brand{display:none}
-  main{padding:16px}
-}
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div class="shell">
@@ -68,82 +15,21 @@ main{padding:24px;flex:1 1 auto}
       <button class="nav-item" data-page="dashboard"><span class="ic">📊</span>داشبورد</button>
       <button class="nav-item" data-page="projects"><span class="ic">📁</span>پروژه‌ها</button>
       <button class="nav-item" data-page="agents"><span class="ic">🤖</span>ایجنت‌ها</button>
-      <button class="nav-item" data-page="knowledge"><span class="ic">🧠</span>دانش و حافظه</button>
       <button class="nav-item" data-page="settings"><span class="ic">⚙️</span>تنظیمات</button>
-      <button class="nav-item" data-page="help"><span class="ic">❓</span>راهنما و پشتیبانی</button>
+      <button class="nav-item" data-page="observability"><span class="ic">👁️</span>مشاهده‌پذیری</button>
     </nav>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <input type="search" placeholder="جستجو در پروژه‌ها و ایجنت‌ها...">
+      <h1>Agent Factory</h1>
       <div class="spacer"></div>
-      <button class="icon-btn" title="اعلان‌ها">🔔</button>
-      <div class="avatar">؟</div>
+      <span class="pill">کارخانه‌ی ایجنت</span>
     </header>
-
-    <main>
-      <section class="page" data-page="dashboard">
-        <h1>داشبورد</h1>
-        <p class="muted">نگاه کلی به پروژه‌ها و فعالیت اخیر تیم.</p>
-        <div class="empty-state">
-          <div class="ic">📊</div>
-          <b>هنوز چیزی برای نشان دادن نیست</b>
-          <span>وقتی پروژه‌ای بسازید، خلاصه‌ی آن اینجا نمایش داده می‌شود.</span>
-        </div>
-      </section>
-
-      <section class="page" data-page="projects">
-        <h1>پروژه‌ها</h1>
-        <p class="muted">لیست پروژه‌ها، وضعیت و مراحل هر کدام.</p>
-        <div class="soon-card"><div class="ic">📁</div><b>در حال ساخت</b><span class="badge">به‌زودی</span></div>
-      </section>
-
-      <section class="page" data-page="agents">
-        <h1>ایجنت‌ها</h1>
-        <p class="muted">فهرست ایجنت‌های ثبت‌شده، قابلیت‌ها و مجوزهای هرکدام.</p>
-        <div class="soon-card"><div class="ic">🤖</div><b>در حال ساخت</b><span class="badge">به‌زودی</span></div>
-      </section>
-
-      <section class="page" data-page="knowledge">
-        <h1>دانش و حافظه</h1>
-        <p class="muted">تصمیم‌های ثبت‌شده و حافظه‌ی بلندمدت پروژه.</p>
-        <div class="soon-card"><div class="ic">🧠</div><b>در حال ساخت</b><span class="badge">به‌زودی</span></div>
-      </section>
-
-      <section class="page" data-page="settings">
-        <h1>تنظیمات</h1>
-        <p class="muted">تنظیمات سراسری، فضای کاری، پروژه و وظیفه.</p>
-        <div class="soon-card"><div class="ic">⚙️</div><b>در حال ساخت</b><span class="badge">به‌زودی</span></div>
-      </section>
-
-      <section class="page" data-page="help">
-        <h1>راهنما و پشتیبانی</h1>
-        <p class="muted">مستندات و راه‌های ارتباط با تیم.</p>
-        <div class="soon-card"><div class="ic">❓</div><b>در حال ساخت</b><span class="badge">به‌زودی</span></div>
-      </section>
-    </main>
+    <main id="page-root"></main>
   </div>
 </div>
 
-<script>
-(function(){
-  var nav = document.getElementById('nav');
-  function go(page){
-    document.querySelectorAll('.nav-item').forEach(function(b){
-      if (b.dataset.page === page) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
-    });
-    document.querySelectorAll('.page').forEach(function(s){
-      if (s.dataset.page === page) s.setAttribute('aria-current', 'page'); else s.removeAttribute('aria-current');
-    });
-    if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page);
-  }
-  nav.addEventListener('click', function(e){
-    var b = e.target.closest('.nav-item');
-    if (b) go(b.dataset.page);
-  });
-  go((location.hash || '#dashboard').slice(1));
-})();
-</script>
+<script src="app.js"></script>
 </body>
 </html>
