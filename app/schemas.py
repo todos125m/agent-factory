@@ -146,3 +146,22 @@ class UsageOut(BaseModel):
     cache_read_tokens: int
     cost_usd: float
     budget_usd: float
+
+
+class ModelCallOut(ORM):
+    id: int
+    project_id: int | None
+    task_id: int | None
+    agent: str | None
+    role: str
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    cost_usd: float
+    duration_ms: int
+    ok: bool
+    error: str | None
+    created_at: datetime

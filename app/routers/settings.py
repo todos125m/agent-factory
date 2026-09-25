@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import settings_layers
@@ -19,6 +20,11 @@ def create_workspace(body: WorkspaceCreate, session: Session = Depends(get_sessi
     session.add(workspace)
     session.commit()
     return workspace
+
+
+@router.get("/workspaces", response_model=list[WorkspaceOut])
+def list_workspaces(session: Session = Depends(get_session)):
+    return session.scalars(select(Workspace).order_by(Workspace.name)).all()
 
 
 @router.get("/settings/resolved")
