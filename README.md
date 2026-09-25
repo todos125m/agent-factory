@@ -19,7 +19,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 |---|---|---|
 | 1 — Foundation | API, DB, User / Project, Task graph, task state machine, event log | ✅ |
 | Infra | Layered settings, agent & skill registry, model gateway with token/cost tracking and budgets, context builder | ✅ |
-| 2 — Manager | Planner, approval gate, mode engine | ⏳ next |
+| 2 — Manager | Planner, approval gate, mode engine | ✅ (learning trace UX pending) |
 | 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
 | 4 — First Agents | Research, Customer, Strategy, Product | |
 | 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
@@ -29,18 +29,30 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
+| UI shell | Static app shell — sidebar, top bar, empty dashboard, placeholder sections | ⏳ started (`web/index.html`, served at `/app`) |
 
 ## Run locally
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload     # http://localhost:8000/docs
+uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost:8000/app for the UI
 pytest
 ```
 
 Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
 (see `.env.example`).
+
+## Run with Docker
+
+```bash
+cp .env.example .env   # add ANTHROPIC_API_KEY once you have one
+docker compose up --build
+# http://localhost:8000/docs
+```
+
+Starts the API and a `postgres:16` container together (with a persisted volume and healthcheck).
+The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 
 ## Phase 1 API
 
@@ -54,6 +66,19 @@ Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `
 | POST | `/projects/{id}/tasks` | Create task with `depends_on` (DAG) |
 | GET  | `/projects/{id}/tasks/runnable` | Tasks whose dependencies are done — safe to run in parallel |
 | POST | `/projects/{id}/tasks/{tid}/transition` | Move task through the state machine |
+
+## Phase 2 API — Manager
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/projects/{id}/plan` | One model call → task graph; unknown agents become `specialist.requested`; waits for approval |
+| POST | `/projects/{id}/plan/approve` | Move dependency-free `CREATED` tasks to `READY` |
+| POST | `/projects/{id}/plan/reject` | Delete the proposed tasks and re-plan with `{feedback}` |
+| POST | `/projects/{id}/tasks/{tid}/checkpoint` | Model proposes options + a recommendation; auto-decided unless mode/risk requires the user |
+| POST | `/projects/{id}/tasks/{tid}/decide` | `{option, note?}` → records the decision, moves the task `READY → RUNNING` |
+
+Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502);
+executing the specialist itself is Phase 4.
 
 ## Infrastructure API
 
