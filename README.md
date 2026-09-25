@@ -29,7 +29,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| UI shell | Static app shell — sidebar, top bar, empty dashboard, placeholder sections | ⏳ started (`web/index.html`, served at `/app`) |
+| UI shell | Admin panel wired to the real API — dashboard, projects (create/plan/checkpoints/events/usage), agents, layered settings, observability | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
 
@@ -85,11 +85,13 @@ executing the specialist itself is Phase 4.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/workspaces` | Create workspace |
+| GET | `/workspaces` | List workspaces |
 | GET/PUT | `/settings/{global\|workspace\|project\|task}/{id}` | Read / replace one settings layer (global id = 0) |
 | GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project ← task |
 | GET | `/agents`, `/agents/{name}`, `?capability=` | Agent registry; POST `/agents` registers after validation |
 | GET | `/skills`, `/skills/{name}` | Skills (summary / full body) |
 | GET | `/projects/{id}/usage` | Tokens, cost and budget for a project |
+| GET | `/projects/{id}/model_calls` | Every model call for a project (role, provider, model, tokens, cost) |
 
 Agents and skills are defined as files in `registry/` and synced at startup.
 Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
