@@ -21,3 +21,23 @@
 - Agents must not depend on concrete model IDs — go through the model gateway (Phase 5).
 - Run tests: `pytest` (in `.venv`: `python -m venv .venv && .venv/bin/pip install -e ".[dev]"`).
 - The user works from a phone and prefers Persian replies.
+
+## Skills playbook (invoke the matching skill at that moment — never load them all up front)
+
+| When | Skill / plugin |
+|---|---|
+| Ideation, judging an idea, market or competitor critique | `anthropic-skills:product-business-review` (Persian report) |
+| Research across many sources before a product decision | `anthropic-skills:deep-research` |
+| Any code that calls Claude (gateway, prompts, caching, cost) | `claude-api` (and `/claude-api cost-optimize` when spend grows) |
+| Building an eval / "is the manager's plan good?" / Benchmark tab | `/claude-api build-eval`, then `/claude-api hillclimb` |
+| Before every push: correctness | `/code-review` on the branch diff |
+| Before every push touching auth, keys, tools, permissions | `/security-review` |
+| After a feature lands: tidy the code | `/simplify` |
+| Seeing the app actually run | `run` |
+| New cloud sessions should install deps and run tests on start | `session-start-hook` |
+| New specialist agent or skill for the registry | `anthropic-skills:skill-creator` (keep skill files short) |
+| Pages, dashboards, diagrams for the owner | `artifact-design`, `artifact-diagramming`, `dataviz`; `/design` for canvases |
+| Architecture / system-design / testing strategy (if the owner enabled it) | `engineering` plugin |
+
+Rules: one skill per need, only when that step happens (token discipline). Record product decisions in the
+decision log; ask the owner once per phase with all questions batched.
