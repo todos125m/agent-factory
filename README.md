@@ -1,1 +1,117 @@
-# agent-factory
+# Agent Factory
+
+An **AI Venture Operating System**: a team of AI agents that understands a goal, plans it as a task graph,
+runs specialists in parallel, reviews the result, and — in **Manual / Learning Mode** — teaches the user
+how the problem was solved.
+
+Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+```text
+USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → RESULT → REVIEW → MEMORY → USER
+                                  ↑                         │
+                                  └──── AGENT FACTORY ──────┘
+                         MANUAL MODE → LEARNING TRACE
+```
+
+## Status
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 — Foundation | API, DB, User / Project, Task graph, task state machine, event log | ✅ |
+| Infra | Layered settings, agent & skill registry, model gateway with token/cost tracking and budgets, context builder | ✅ |
+| 2 — Manager | Planner, approval gate, mode engine | ✅ (learning trace UX pending) |
+| 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
+| 4 — First Agents | Research, Customer, Strategy, Product | |
+| 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
+| 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
+| 7 — Memory | Project state, decisions, retrieval, learning memory | |
+| 8 — Learning UX | Learning Trace, Ask Why, Try It Myself | |
+| 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
+| 10 — Idea Hunter | Scheduled opportunity discovery | |
+| 11 — Scale | Queue workers, caching, observability, rate limits | |
+| UI shell | Admin panel wired to the real API — dashboard, projects (create/plan/checkpoints/events/usage), agents, layered settings, observability | ✅ (`web/`, served at `/app`) |
+
+## Run locally
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost:8000/app for the UI
+pytest
+```
+
+Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
+(see `.env.example`).
+
+## Run with Docker
+
+```bash
+cp .env.example .env   # add ANTHROPIC_API_KEY once you have one
+docker compose up --build
+# http://localhost:8000/docs
+```
+
+Starts the API and a `postgres:16` container together (with a persisted volume and healthcheck).
+The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
+
+## Phase 1 API
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/users` | Create user |
+| POST | `/projects` | Create project (`mode`: `automatic` / `manual_learning`) |
+| POST | `/projects/{id}/stage` | Advance project stage (IDEA → DISCOVERY → … → ITERATION) |
+| POST | `/projects/{id}/pause` | Pause / resume |
+| GET  | `/projects/{id}/events` | Audit log of every transition |
+| POST | `/projects/{id}/tasks` | Create task with `depends_on` (DAG) |
+| GET  | `/projects/{id}/tasks/runnable` | Tasks whose dependencies are done — safe to run in parallel |
+| POST | `/projects/{id}/tasks/{tid}/transition` | Move task through the state machine |
+
+## Phase 2 API — Manager
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/projects/{id}/plan` | One model call → task graph; unknown agents become `specialist.requested`; waits for approval |
+| POST | `/projects/{id}/plan/approve` | Move dependency-free `CREATED` tasks to `READY` |
+| POST | `/projects/{id}/plan/reject` | Delete the proposed tasks and re-plan with `{feedback}` |
+| POST | `/projects/{id}/tasks/{tid}/checkpoint` | Model proposes options + a recommendation; auto-decided unless mode/risk requires the user |
+| POST | `/projects/{id}/tasks/{tid}/decide` | `{option, note?}` → records the decision, moves the task `READY → RUNNING` |
+
+Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502);
+executing the specialist itself is Phase 4.
+
+## Infrastructure API
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/workspaces` | Create workspace |
+| GET | `/workspaces` | List workspaces |
+| GET/PUT | `/settings/{global\|workspace\|project\|task}/{id}` | Read / replace one settings layer (global id = 0) |
+| GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project ← task |
+| GET | `/agents`, `/agents/{name}`, `?capability=` | Agent registry; POST `/agents` registers after validation |
+| GET | `/skills`, `/skills/{name}` | Skills (summary / full body) |
+| GET | `/projects/{id}/usage` | Tokens, cost and budget for a project |
+| GET | `/projects/{id}/model_calls` | Every model call for a project (role, provider, model, tokens, cost) |
+
+Agents and skills are defined as files in `registry/` and synced at startup.
+Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
+every call logged with tokens and cost). `app/context.py` builds the smallest prompt a call needs.
+
+### Model access
+
+Each role's provider is either set explicitly (`models.<role>.provider`) or follows the
+top-level `model_access` switch (`GET/PUT /settings/global/0`), which applies to every role
+that doesn't override it:
+
+- **`api_key`** (provider `anthropic`) — set `ANTHROPIC_API_KEY` and `pip install -e ".[anthropic]"`.
+  Needed to serve other people, since it doesn't depend on any one person being logged in.
+- **`claude_account`** (provider `claude_account`, the default) — uses the owner's own Claude
+  subscription, no API key: the gateway shells out to the Claude Code CLI in headless mode
+  (`claude -p --output-format json`). For the owner's personal use only; install the CLI
+  ([code.claude.com/docs/en/setup](https://code.claude.com/docs/en/setup)) and either run `claude`
+  once locally to log in, or set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in Docker
+  or on a server with no interactive login — see `.env.example`.
+
+Task states: `CREATED → READY → RUNNING → (WAITING) → COMPLETED → REVIEWED`, with
+`FAILED → READY` (retry, bounded by `max_retries`) or `→ ESCALATED`, and `COMPLETED → READY`
+for the reviewer's `CHANGES_REQUIRED` loop.
