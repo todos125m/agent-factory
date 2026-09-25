@@ -52,9 +52,10 @@ class Gateway:
         budget = settings["budget"]
         max_out = int(budget["max_output_tokens"])
 
-        # Worst case for this call: all input uncached, all output tokens used.
-        estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
-        self._check_budget(project_id, task_id, budget, estimate)
+        if not getattr(provider, "free", False):
+            # Worst case for this call: all input uncached, all output tokens used.
+            estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
+            self._check_budget(project_id, task_id, budget, estimate)
 
         request = ModelRequest(
             model=route["model"],
@@ -80,7 +81,10 @@ class Gateway:
         u = response.usage
         call.input_tokens, call.output_tokens = u.input_tokens, u.output_tokens
         call.cache_read_tokens, call.cache_write_tokens = u.cache_read_tokens, u.cache_write_tokens
-        call.cost_usd = cost_usd(route["model"], u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens)
+        call.cost_usd = (
+            response.cost_usd if response.cost_usd is not None
+            else cost_usd(route["model"], u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens)
+        )
         call.duration_ms = int((time.monotonic() - started) * 1000)
         self.session.add(call)
         self.session.commit()

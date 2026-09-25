@@ -23,6 +23,9 @@ DEFAULTS: dict[str, Any] = {
         "max_output_tokens": 2000,
     },
     "context": {"max_chars": 6000},
+    # Owner-wide convenience switch (§ model access modes): "api_key" or "claude_account". Applied to
+    # every role that doesn't set its own "provider" explicitly in some settings layer (see resolve()).
+    "model_access": "claude_account",
     # Agents name a role, never a model ID (§29). Each role maps to a provider + model here.
     "models": {
         "manager": {"provider": "anthropic", "model": "claude-opus-5", "effort": "medium"},
@@ -31,6 +34,8 @@ DEFAULTS: dict[str, Any] = {
         "cheap": {"provider": "anthropic", "model": "claude-haiku-4-5", "effort": None},
     },
 }
+
+MODEL_ACCESS_PROVIDERS: dict[str, str] = {"api_key": "anthropic", "claude_account": "claude_account"}
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -69,6 +74,7 @@ def resolve(
         (SettingsScope.TASK, task_id),
     ]
     result = copy.deepcopy(DEFAULTS)
+    explicit_role_provider: set[str] = set()
     for scope, scope_id in chain:
         if scope_id is None:
             continue
@@ -76,5 +82,16 @@ def resolve(
             result = deep_merge(result, {"budget": {"project_usd": project.budget}})
         layer = get_layer(session, scope, scope_id)
         if layer is not None:
+            models_override = layer.values.get("models")
+            if isinstance(models_override, dict):
+                for role, cfg in models_override.items():
+                    if isinstance(cfg, dict) and "provider" in cfg:
+                        explicit_role_provider.add(role)
             result = deep_merge(result, layer.values)
+
+    provider = MODEL_ACCESS_PROVIDERS.get(result.get("model_access"))
+    if provider is not None and isinstance(result.get("models"), dict):
+        for role, cfg in result["models"].items():
+            if role not in explicit_role_provider and isinstance(cfg, dict):
+                cfg["provider"] = provider
     return result

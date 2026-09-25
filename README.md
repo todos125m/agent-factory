@@ -69,7 +69,21 @@ Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `
 Agents and skills are defined as files in `registry/` and synced at startup.
 Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
 every call logged with tokens and cost). `app/context.py` builds the smallest prompt a call needs.
-Set `ANTHROPIC_API_KEY` and `pip install -e ".[anthropic]"` to use Claude.
+
+### Model access
+
+Each role's provider is either set explicitly (`models.<role>.provider`) or follows the
+top-level `model_access` switch (`GET/PUT /settings/global/0`), which applies to every role
+that doesn't override it:
+
+- **`api_key`** (provider `anthropic`) — set `ANTHROPIC_API_KEY` and `pip install -e ".[anthropic]"`.
+  Needed to serve other people, since it doesn't depend on any one person being logged in.
+- **`claude_account`** (provider `claude_account`, the default) — uses the owner's own Claude
+  subscription, no API key: the gateway shells out to the Claude Code CLI in headless mode
+  (`claude -p --output-format json`). For the owner's personal use only; install the CLI
+  ([code.claude.com/docs/en/setup](https://code.claude.com/docs/en/setup)) and either run `claude`
+  once locally to log in, or set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in Docker
+  or on a server with no interactive login — see `.env.example`.
 
 Task states: `CREATED → READY → RUNNING → (WAITING) → COMPLETED → REVIEWED`, with
 `FAILED → READY` (retry, bounded by `max_retries`) or `→ ESCALATED`, and `COMPLETED → READY`

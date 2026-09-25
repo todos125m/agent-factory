@@ -2,6 +2,9 @@
 
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -31,6 +34,7 @@ class ModelResponse:
     model: str
     data: Any = None  # parsed JSON when a schema was requested
     stop_reason: str | None = None
+    cost_usd: float | None = None  # overrides the gateway's pricing-table estimate when set (e.g. subscription calls)
 
 
 class ProviderError(RuntimeError):
@@ -89,6 +93,74 @@ class AnthropicProvider:
         return ModelResponse(text=text, usage=usage, model=response.model, data=data, stop_reason=response.stop_reason)
 
 
+class ClaudeAccountProvider:
+    """Mode B: the owner's own Claude subscription via the Claude Code CLI headless mode, no API key.
+
+    Runs `claude -p --output-format json` with `--safe-mode` (disables CLAUDE.md, skills, hooks,
+    MCP servers, custom commands/agents — auth and model selection are unaffected) plus a fresh,
+    empty cwd, so nothing from the owner's `~/.claude` or the project directory leaks into a role
+    completion. `--bare` would isolate the same things but also stops Claude Code from reading
+    OAuth credentials, which is the whole point of this provider, so it's not used here.
+    Authentication is whatever `claude` itself resolves: a local `claude login` session, or
+    CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) in the environment.
+    """
+
+    name = "claude_account"
+    free = True  # subscription usage: no per-call API spend, so budget $-checks don't apply
+    timeout_s = 120
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        binary = shutil.which("claude")
+        if binary is None:
+            raise ProviderError("Claude Code CLI not found on PATH; install it or set model_access to 'api_key'")
+
+        args = [
+            binary, "-p", request.user,
+            "--output-format", "json",
+            "--system-prompt", request.system,
+            "--model", request.model,
+            "--max-turns", "1",
+            "--permission-prompts", "none",
+            "--safe-mode",
+        ]
+        if request.effort:
+            args += ["--effort", request.effort]
+        if request.json_schema:
+            args += ["--json-schema", json.dumps(request.json_schema)]
+
+        with tempfile.TemporaryDirectory(prefix="agent-factory-claude-account-") as cwd:
+            try:
+                proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=self.timeout_s)
+            except FileNotFoundError as e:
+                raise ProviderError("Claude Code CLI not found; install it or set model_access to 'api_key'") from e
+            except subprocess.TimeoutExpired as e:
+                raise ProviderError(f"Claude Code CLI timed out after {self.timeout_s}s") from e
+
+        try:
+            payload = json.loads(proc.stdout)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ProviderError(
+                f"Claude Code CLI returned unparseable output (exit {proc.returncode}): {proc.stderr[:500] or proc.stdout[:500]}"
+            ) from e
+
+        if payload.get("is_error"):
+            raise ProviderError(f"Claude Code CLI error ({payload.get('subtype', 'unknown')}): {payload.get('result', '')[:500]}")
+
+        text = payload.get("result", "")
+        data = payload.get("structured_output") if request.json_schema else None
+        raw_usage = payload.get("usage") or {}
+        usage = Usage(
+            input_tokens=raw_usage.get("input_tokens", 0),
+            output_tokens=raw_usage.get("output_tokens", 0),
+            cache_read_tokens=raw_usage.get("cache_read_input_tokens", 0),
+            cache_write_tokens=raw_usage.get("cache_creation_input_tokens", 0),
+        )
+        return ModelResponse(
+            text=text, usage=usage, model=request.model, data=data,
+            stop_reason=payload.get("subtype"), cost_usd=0.0,  # subscription usage: no per-call API spend
+        )
+
+
 class NotConfiguredProvider:
     """Placeholder for a provider the owner chose but whose adapter/key is not in place yet."""
 
@@ -117,7 +189,11 @@ class FakeProvider:
 
 
 def default_providers() -> dict[str, Provider]:
-    providers: dict[str, Provider] = {"anthropic": AnthropicProvider(), "openai": NotConfiguredProvider("openai")}
+    providers: dict[str, Provider] = {
+        "anthropic": AnthropicProvider(),
+        "claude_account": ClaudeAccountProvider(),
+        "openai": NotConfiguredProvider("openai"),
+    }
     if os.getenv("AGENT_FACTORY_FAKE_MODELS"):
         providers["fake"] = FakeProvider()
     return providers
