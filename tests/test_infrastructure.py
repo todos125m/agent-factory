@@ -58,10 +58,10 @@ def test_manager_is_registered_with_skills(client):
 
 def test_registry_rejects_duplicates_and_unknowns(client):
     base = {"description": "d", "model_role": "research", "capabilities": ["web_research"], "tools": ["web_search"]}
-    assert client.post("/agents", json={**base, "name": "researcher"}).status_code == 201
-    dup = client.post("/agents", json={**base, "name": "researcher2"})
+    assert client.post("/agents", json={**base, "name": "explorer"}).status_code == 201
+    dup = client.post("/agents", json={**base, "name": "explorer2"})
     assert dup.status_code == 422 and "duplicate" in dup.json()["detail"]
-    assert client.post("/agents", json={**base, "name": "researcher"}).status_code == 422
+    assert client.post("/agents", json={**base, "name": "explorer"}).status_code == 422
     bad_tool = client.post("/agents", json={**base, "name": "x1", "capabilities": ["a"], "tools": ["rm_rf"]})
     assert bad_tool.status_code == 422
     bad_skill = client.post("/agents", json={**base, "name": "x2", "capabilities": ["b"], "skills": ["nope"]})

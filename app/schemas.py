@@ -89,6 +89,11 @@ class TaskTransition(BaseModel):
     reason: str | None = None
 
 
+class TaskRunResultOut(BaseModel):
+    task: TaskOut
+    ready_task_ids: list[int]
+
+
 class RunEventOut(ORM):
     id: int
     project_id: int

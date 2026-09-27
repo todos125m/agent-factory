@@ -22,7 +22,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 2 — Manager | Planner, approval gate, mode engine | ✅ (learning trace UX pending) |
 | 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
 | Agent Blueprint | Mandatory 14-section standard (`docs/AGENT_BLUEPRINT.md`), schema validator, guided interview | ✅ |
-| 4 — First Agents | Research, Customer, Strategy, Product | |
+| 4 — First Agents | Research, Customer, Strategy, Product; task execution (`/tasks/{id}/run`) | ✅ (base — no tools yet) |
 | 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
 | 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
 | 7 — Memory | Project state, decisions, retrieval, learning memory | |
@@ -80,9 +80,9 @@ The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 | POST | `/projects/{id}/plan/reject` | Delete the proposed tasks and re-plan with `{feedback}` |
 | POST | `/projects/{id}/tasks/{tid}/checkpoint` | Model proposes options + a recommendation; auto-decided unless mode/risk requires the user |
 | POST | `/projects/{id}/tasks/{tid}/decide` | `{option, note?}` → records the decision, moves the task `READY → RUNNING` |
+| POST | `/projects/{id}/tasks/{tid}/run` | Executes a `RUNNING` task with its owner agent (Phase 4): one `Gateway.call` (agent's role + skills + `context.task_context`, which includes the chosen option and dependency summaries) → `{summary, findings[{claim,type,basis}], lesson, next}`; stores the output, moves `RUNNING → COMPLETED`, and any dependent task whose dependencies are now all done becomes `READY` |
 
-Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502);
-executing the specialist itself is Phase 4.
+Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -91,6 +91,16 @@ executing the specialist itself is Phase 4.
 | GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval and checkpoints awaiting a decision — derived from existing events, nothing new stored |
 | POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |
 | GET  | `/agents/{name}/feedback` | Feedback recorded for one agent; turning it into skill updates is a later phase |
+
+## Phase 4 — First Specialists
+
+Four specialists ship in `registry/agents/` (`researcher`, `customer`, `strategy`, `product`), each a valid
+`docs/AGENT_BLUEPRINT.md` specialist (Synthesis + Memory/Log only — no Persona engine, `observation.record`
+fixed to `["runevent"]`), reasoning from `context.task_context` only — no tools yet, no browsing. Every
+specialist shares the `task-execution` skill (the `/run` output shape) and `evidence` (FACT/INFERENCE/
+HYPOTHESIS, never invented sources), plus one domain skill (`research-method`, `customer-voice`,
+`strategy-framing`, `product-definition`). The web panel shows an «اجرا» button on `RUNNING` tasks and
+renders the result with evidence chips per finding.
 
 ## Agent Blueprint API
 

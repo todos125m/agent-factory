@@ -78,6 +78,9 @@ textarea{min-height:80px;resize:vertical}
 .chip.status-CANCELLED{color:var(--muted);text-decoration:line-through}
 .chip.risk-high{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .chip.risk-medium{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.chip.ev-fact{background:var(--good-soft);color:var(--good);border-color:transparent;flex:none}
+.chip.ev-inference{background:var(--accent-soft);color:var(--accent);border-color:transparent;flex:none}
+.chip.ev-hypothesis{background:var(--warn-soft);color:var(--warn);border-color:transparent;flex:none}
 
 .badge{display:inline-block;font-size:11px;font-weight:800;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:3px 10px}
 

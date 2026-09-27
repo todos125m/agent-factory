@@ -630,7 +630,53 @@ function renderProjectDetail(root, projectId){
       el('p', {class:'muted', text:'عهده‌دار: ' + (t.owner || '—') + (t.depends_on.length ? ' · وابسته به: #' + t.depends_on.join('، #') : '')})
     );
     if (t.status === 'READY') row.appendChild(checkpointArea(t));
+    if (t.status === 'RUNNING') row.appendChild(runArea(t));
+    // Not shown while RUNNING: a redo loop (COMPLETED -> READY -> RUNNING) keeps the old output
+    // until this run finishes, and showing it next to the "اجرا" button would look like a fresh result.
+    if (t.output && t.status !== 'RUNNING') row.appendChild(outputBox(t.output));
     return row;
+  }
+
+  function runArea(t){
+    var holder = el('div', {class:'stack'});
+    var btn = el('button', {class:'btn sm', text:'اجرا'});
+    holder.appendChild(btn);
+    btn.addEventListener('click', function(){
+      btn.disabled = true;
+      clear(holder);
+      holder.appendChild(loadingBox('در حال اجرای وظیفه…'));
+      api('/projects/' + projectId + '/tasks/' + t.id + '/run', {method:'POST'})
+        .then(reload)
+        .catch(function(e){
+          clear(holder);
+          holder.appendChild(errorBox(e.message));
+          holder.appendChild(el('button', {class:'btn ghost sm', text:'دوباره امتحان کن',
+            onclick:function(){ clear(holder); holder.appendChild(btn); btn.disabled = false; }}));
+        });
+    });
+    return holder;
+  }
+
+  var EVIDENCE_FA = {FACT:'واقعیت', INFERENCE:'استنتاج', HYPOTHESIS:'فرضیه'};
+  function evidenceChip(type){
+    return el('span', {class:'chip ev-' + String(type).toLowerCase(), text: EVIDENCE_FA[type] || type});
+  }
+
+  function outputBox(output){
+    var box = el('div', {class:'stack', style:'margin-top:8px'});
+    if (output.summary) box.appendChild(el('p', {}, el('b', {text:'خلاصه: '}), output.summary));
+    if (output.findings && output.findings.length){
+      var list = el('div', {class:'stack', style:'gap:6px'});
+      output.findings.forEach(function(f){
+        list.appendChild(el('div', {class:'row', style:'align-items:flex-start;gap:8px'},
+          evidenceChip(f.type),
+          el('span', {}, el('b', {text:f.claim}), el('small', {class:'muted', text:' — ' + f.basis}))));
+      });
+      box.appendChild(list);
+    }
+    if (output.lesson) box.appendChild(el('p', {class:'muted'}, el('b', {text:'درس: '}), output.lesson));
+    if (output.next) box.appendChild(el('p', {class:'muted'}, el('b', {text:'گام بعد: '}), output.next));
+    return box;
   }
 
   function checkpointArea(t){

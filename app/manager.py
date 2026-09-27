@@ -3,7 +3,7 @@ approval, run per-task decision checkpoints. Deterministic logic (DAG validation
 resolution, state transitions) stays in code; the model only proposes plans and checkpoints.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
@@ -44,6 +44,19 @@ class CheckpointOut(BaseModel):
     options: list[CheckpointOption] = Field(min_length=2, max_length=4)
     recommended: int
     why: str
+
+
+class TaskFinding(BaseModel):
+    claim: str
+    type: Literal["FACT", "INFERENCE", "HYPOTHESIS"]
+    basis: str
+
+
+class TaskRunOut(BaseModel):
+    summary: str
+    findings: list[TaskFinding] = Field(default_factory=list)
+    lesson: str
+    next: str
 
 
 def manager_agent(session: Session) -> Agent:
@@ -154,9 +167,9 @@ def create_plan(session: Session, gateway: Gateway, project: Project, *, feedbac
     }
 
 
-def approve_plan(session: Session, project: Project) -> dict[str, Any]:
+def _promote_ready(session: Session, project_id: int, tasks: list[Task], reason: str) -> list[int]:
+    """CREATED `tasks` whose dependencies are all done become READY (§33)."""
     ready_ids: list[int] = []
-    tasks = session.scalars(select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED)).all()
     for task in tasks:
         deps = _dependency_statuses(session, task)
         try:
@@ -165,9 +178,15 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
         except TransitionError:
             continue
         task.status = TaskStatus.READY
-        record_event(session, project.id, "task.status_changed", task.id,
-                      **{"from": "CREATED", "to": "READY", "reason": "plan approved"})
+        record_event(session, project_id, "task.status_changed", task.id,
+                      **{"from": "CREATED", "to": "READY", "reason": reason})
         ready_ids.append(task.id)
+    return ready_ids
+
+
+def approve_plan(session: Session, project: Project) -> dict[str, Any]:
+    tasks = session.scalars(select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED)).all()
+    ready_ids = _promote_ready(session, project.id, tasks, "plan approved")
     record_event(session, project.id, "decision.plan_approved", None, ready_task_ids=ready_ids)
     session.commit()
     return {"ready_task_ids": ready_ids}
@@ -226,3 +245,49 @@ def _decide(session: Session, task: Task, option: int, note: str | None, *, auto
 def decide(session: Session, task: Task, option: int, note: str | None) -> None:
     _decide(session, task, option, note, auto=False)
     session.commit()
+
+
+def _promote_ready_dependents(session: Session, project: Project, task: Task) -> list[int]:
+    """CREATED tasks depending on `task` whose dependencies are now all done become READY (§33)."""
+    dependent_ids = select(TaskDependency.task_id).where(TaskDependency.depends_on_id == task.id)
+    dependents = session.scalars(
+        select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED, Task.id.in_(dependent_ids))
+    ).all()
+    return _promote_ready(session, project.id, dependents, "dependency completed")
+
+
+def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
+    """Execute a RUNNING task with its owner agent: one Gateway.call, deterministic result handling."""
+    if task.status is not TaskStatus.RUNNING:
+        raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
+    check_task_transition(task.status, TaskStatus.COMPLETED, dependency_statuses=[],
+                           retries=task.retries, max_retries=task.max_retries)
+    previous = task.status
+
+    if not task.owner:
+        raise ManagerError("task has no owner agent")
+    agent = session.scalar(select(Agent).where(Agent.name == task.owner, Agent.active))
+    if agent is None:
+        raise ManagerError(f"agent '{task.owner}' is not registered")
+
+    system = context.system_prompt(session, agent, agent.skills)
+    user = context.task_context(session, task)
+    response = gateway.call(
+        agent.model_role, system=system, user=user, project_id=project.id, task_id=task.id, agent=agent.name,
+        json_schema=TaskRunOut.model_json_schema(),
+    )
+    try:
+        result = TaskRunOut.model_validate(response.data)
+    except ValidationError as e:
+        raise ManagerError(f"invalid task output: {e}") from e
+
+    task.output = result.model_dump()
+    task.status = TaskStatus.COMPLETED
+    record_event(session, project.id, "task.status_changed", task.id,
+                 **{"from": previous.value, "to": "COMPLETED", "reason": "task executed"})
+    record_event(session, project.id, "task.completed", task.id, **result.model_dump())
+    session.flush()  # dependents' status query below must see this task's new COMPLETED status
+
+    ready_ids = _promote_ready_dependents(session, project, task)
+    session.commit()
+    return {"task": task, "ready_task_ids": ready_ids}

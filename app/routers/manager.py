@@ -11,7 +11,7 @@ from app.gateway.service import BudgetExceeded, Gateway
 from app.manager import ManagerError
 from app.routers.projects import load_project
 from app.routers.tasks import load_task
-from app.schemas import ChatMessageOut, ChatTurnOut, TaskOut
+from app.schemas import ChatMessageOut, ChatTurnOut, TaskOut, TaskRunResultOut
 from app.state_machine import TransitionError
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["manager"])
@@ -30,6 +30,8 @@ def _run(fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[s
         raise HTTPException(402, str(e)) from e
     except ProviderError as e:
         raise HTTPException(502, str(e)) from e
+    except TransitionError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 class PlanReject(BaseModel):
@@ -84,6 +86,15 @@ def decide(project_id: int, tid: int, body: DecisionIn, session: Session = Depen
     except TransitionError as e:
         raise HTTPException(409, str(e)) from e
     return task
+
+
+@router.post("/tasks/{tid}/run", response_model=TaskRunResultOut)
+def run_task(
+    project_id: int, tid: int, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+):
+    project = load_project(session, project_id)
+    task = load_task(session, project_id, tid)
+    return _run(manager.run_task, session, gateway, project, task)
 
 
 @router.post("/chat", response_model=ChatTurnOut)
