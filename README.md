@@ -21,6 +21,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | Infra | Layered settings, agent & skill registry, model gateway with token/cost tracking and budgets, context builder | ✅ |
 | 2 — Manager | Planner, approval gate, mode engine | ✅ (learning trace UX pending) |
 | 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
+| Agent Blueprint | Mandatory 14-section standard (`docs/AGENT_BLUEPRINT.md`), schema validator, guided interview | ✅ |
 | 4 — First Agents | Research, Customer, Strategy, Product | |
 | 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
 | 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
@@ -90,6 +91,24 @@ executing the specialist itself is Phase 4.
 | GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval and checkpoints awaiting a decision — derived from existing events, nothing new stored |
 | POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |
 | GET  | `/agents/{name}/feedback` | Feedback recorded for one agent; turning it into skill updates is a later phase |
+
+## Agent Blueprint API
+
+Every agent built in the factory must satisfy `docs/AGENT_BLUEPRINT.md` — the mandatory 14-section
+standard derived from the owner's architecture image, mapped onto what already exists (gateway,
+context builder, `RunEvent`/`ModelCall`, registry). Validation is deterministic, no model calls
+(`app/blueprint.py`, schema in `registry/blueprint.schema.json`).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/blueprints/validate` | Deterministic check of a blueprint against the 14 sections; returns `{valid, issues}` |
+| GET  | `/interview` | Next guided-interview question given `answers` collected so far (or the completed blueprint) |
+| POST | `/interview/answer` | Record one answer, return the next question or the completed blueprint |
+
+Interview questions live as one YAML file per section in `registry/interview/` (loader: `app/interview.py`).
+A model is used only to turn a free-text answer into its field (`registry/skills/agent-intake.md`) —
+which question comes next and how answers become a blueprint are pure code. The web UI's
+"+ ساخت Agent جدید" button (`/app#agents/new`) walks the same interview one question per screen.
 
 ## Infrastructure API
 

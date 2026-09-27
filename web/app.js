@@ -137,6 +137,7 @@ function route(){
   else if (page === 'inbox') renderInbox(root);
   else if (page === 'projects' && parts[1]) renderProjectDetail(root, Number(parts[1]));
   else if (page === 'projects') renderProjectsList(root);
+  else if (page === 'agents' && parts[1] === 'new') renderAgentIntake(root);
   else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'settings') renderSettings(root);
@@ -715,7 +716,8 @@ function renderProjectDetail(root, projectId){
 /* ============================== agents ============================== */
 
 function renderAgentsList(root){
-  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:'ایجنت‌ها'})));
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:'ایجنت‌ها'}),
+    el('button', {class:'btn sm', onclick:function(){ go('agents/new'); }}, '+ ساخت Agent جدید')));
   var body = el('div', {class:'list'});
   root.appendChild(body);
   body.appendChild(loadingBox());
@@ -835,6 +837,85 @@ function renderAgentDetail(root, name){
     agentData = r[0]; skillsData = r[1];
     draw();
   }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message)); });
+}
+
+/* ============================== agent intake (guided blueprint interview) ============================== */
+
+function renderAgentIntake(root){
+  root.appendChild(el('div', {class:'page-head'},
+    el('button', {class:'btn ghost sm', onclick:function(){ go('agents'); }}, '← ایجنت‌ها'),
+    el('h2', {text:'ساخت Agent جدید'})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+  var answers = {};
+
+  function start(){
+    clear(body);
+    body.appendChild(loadingBox());
+    api('/interview').then(draw).catch(function(e){ clear(body); body.appendChild(errorBox(e.message, start)); });
+  }
+
+  function draw(state){
+    clear(body);
+    if (state.done){ drawSummary(state); return; }
+    drawQuestion(state.question);
+  }
+
+  function submit(target, value){
+    clear(body);
+    body.appendChild(loadingBox());
+    api('/interview/answer', {method:'POST', json:{answers: answers, target: target, value: value}})
+      .then(function(state){ answers[target] = value; draw(state); })
+      .catch(function(e){ clear(body); body.appendChild(errorBox(e.message, function(){ submit(target, value); })); });
+  }
+
+  function drawQuestion(q){
+    var card = el('div', {class:'card stack'}, el('h3', {text:q.text}));
+    if (q.type === 'single_choice' || q.type === 'confirm'){
+      var opts = q.type === 'confirm' ? [{value:true,label:'بله'},{value:false,label:'خیر'}] : q.options;
+      card.appendChild(el('div', {class:'row'}, opts.map(function(o){
+        var label = o.label + (o.recommended ? ' ✓' : '');
+        return el('button', {class:'btn' + (o.recommended ? '' : ' ghost') + ' sm', onclick:function(){ submit(q.target, o.value); }}, label);
+      })));
+    } else if (q.type === 'multi_choice'){
+      var chosen = [];
+      var chips = q.options.map(function(o){
+        var b = el('button', {class:'tab', text: o.label + (o.recommended ? ' ✓' : '')});
+        b.addEventListener('click', function(){
+          var i = chosen.indexOf(o.value);
+          if (i === -1){ chosen.push(o.value); b.classList.add('active'); } else { chosen.splice(i, 1); b.classList.remove('active'); }
+        });
+        return b;
+      });
+      card.appendChild(el('div', {class:'row'}, chips));
+      card.appendChild(el('button', {class:'btn sm', style:'margin-top:8px', onclick:function(){ submit(q.target, chosen); }}, 'ادامه'));
+    } else {
+      var input = el('input', {type:'text'});
+      card.appendChild(input);
+      card.appendChild(el('button', {class:'btn sm', style:'margin-top:8px', onclick:function(){ submit(q.target, input.value); }}, 'ادامه'));
+    }
+    if (q.note) card.appendChild(el('p', {class:'muted', text:q.note}));
+    body.appendChild(card);
+  }
+
+  function drawSummary(state){
+    var bp = state.blueprint;
+    var card = el('div', {class:'card stack'}, el('h3', {text:'خلاصه‌ی Blueprint'}));
+    Object.keys(bp).forEach(function(section){
+      card.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+        el('b', {text:section}), el('span', {class:'muted', text: JSON.stringify(bp[section])})));
+    });
+    if (state.issues && state.issues.length){
+      card.appendChild(el('h3', {text:'موارد ناقص'}));
+      state.issues.forEach(function(i){ card.appendChild(el('p', {class:'muted', text:'⚠️ ' + i})); });
+    } else {
+      card.appendChild(el('p', {text:'✅ Blueprint معتبر است.'}));
+    }
+    card.appendChild(el('p', {text:'این مسیر را می‌رویم؟'}));
+    body.appendChild(card);
+  }
+
+  start();
 }
 
 /* ============================== settings ============================== */

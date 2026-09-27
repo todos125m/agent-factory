@@ -1,0 +1,7 @@
+section: scalability
+questions:
+  - id: scalability.evaluation
+    text: "موفقیت این Agent چطور سنجیده می‌شود؟ (حداقل یک معیار قابل‌سنجش، مثل «۹۰٪ کارها بدون escalation»)"
+    type: text
+    target: scalability.evaluation
+    note: "deployment همیشه docker_compose است (بدون Kubernetes، §53)."

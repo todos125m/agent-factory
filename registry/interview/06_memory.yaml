@@ -1,0 +1,7 @@
+section: memory
+questions:
+  - id: memory.long_term_sources
+    text: "این Agent به چه حافظه‌ی بلندمدتی نیاز دارد؟ (لیست کوتاه؛ می‌تواند خالی باشد)"
+    type: text
+    target: memory.long_term_sources
+    note: "حافظه‌ی کوتاه‌مدت (پنجره‌ی همین اجرا) همیشه فعال است — چیزی نمی‌پرسیم."
