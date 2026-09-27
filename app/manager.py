@@ -46,7 +46,7 @@ class CheckpointOut(BaseModel):
     why: str
 
 
-def _manager_agent(session: Session) -> Agent:
+def manager_agent(session: Session) -> Agent:
     agent = session.scalar(select(Agent).where(Agent.name == "manager"))
     if agent is None:
         raise ManagerError("manager agent is not registered")
@@ -103,7 +103,7 @@ def _plan_user_content(session: Session, project: Project, feedback: str | None)
 
 def create_plan(session: Session, gateway: Gateway, project: Project, *, feedback: str | None = None) -> dict[str, Any]:
     settings = settings_layers.resolve(session, project_id=project.id)
-    system = context.system_prompt(session, _manager_agent(session), ["plan-goal", "delegate", "evidence"])
+    system = context.system_prompt(session, manager_agent(session), ["plan-goal", "delegate", "evidence"])
     user = _plan_user_content(session, project, feedback)
     response = gateway.call(
         "manager", system=system, user=user, project_id=project.id, agent="manager",
@@ -193,7 +193,7 @@ def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
 
 
 def create_checkpoint(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
-    system = context.system_prompt(session, _manager_agent(session), ["decision-checkpoint", "evidence"])
+    system = context.system_prompt(session, manager_agent(session), ["decision-checkpoint", "evidence"])
     user = context.task_context(session, task)
     response = gateway.call(
         "manager", system=system, user=user, project_id=project.id, task_id=task.id, agent="manager",

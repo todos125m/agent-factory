@@ -189,6 +189,34 @@ class Agent(Base):
     active: Mapped[bool] = mapped_column(default=True)
 
 
+class ChatMessage(Base):
+    """One turn in the owner ↔ manager chat for a project (§ manager checkpoint UX)."""
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(20))  # "user" | "manager"
+    text: Mapped[str] = mapped_column(Text)
+    suggested_action: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Feedback(Base):
+    """Owner feedback on an agent's output (§8 Learning UX). Turning this into skill
+    updates is a later phase; for now it is only stored and shown."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    agent: Mapped[str] = mapped_column(String(100))
+    rating: Mapped[str] = mapped_column(String(10))  # "up" | "down"
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ModelCall(Base):
     """Every model call, for token/cost tracking and budgets (§31, §34)."""
 

@@ -107,13 +107,22 @@ function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(
 
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','projects','agents','settings','observability'];
+var PAGES = ['dashboard','inbox','projects','agents','settings','observability'];
 var root;
 
 function setNav(page){
   document.querySelectorAll('.nav-item').forEach(function(b){
     b.classList.toggle('active', b.dataset.page === page);
   });
+}
+
+function refreshInboxBadge(){
+  api('/inbox').then(function(items){
+    var badge = document.getElementById('inbox-badge');
+    if (!badge) return;
+    if (items.length){ badge.hidden = false; badge.textContent = items.length > 99 ? '99+' : String(items.length); }
+    else badge.hidden = true;
+  }).catch(function(){});
 }
 
 function route(){
@@ -123,7 +132,9 @@ function route(){
   if (PAGES.indexOf(page) === -1) page = 'dashboard';
   setNav(page);
   clear(root);
+  refreshInboxBadge();
   if (page === 'dashboard') renderDashboard(root);
+  else if (page === 'inbox') renderInbox(root);
   else if (page === 'projects' && parts[1]) renderProjectDetail(root, Number(parts[1]));
   else if (page === 'projects') renderProjectsList(root);
   else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
@@ -133,6 +144,114 @@ function route(){
 }
 
 function go(hash){ location.hash = hash; }
+
+/* ============================== feedback (training) ============================== */
+
+function feedbackWidget(projectId, agent, taskId){
+  var wrap = el('div', {class:'feedback-row'});
+  var note = el('input', {type:'text', placeholder:'یادداشت (اختیاری)', style:'flex:1 1 160px'});
+  var status = el('span', {class:'muted'});
+  var up = el('button', {class:'thumb', type:'button', text:'👍'});
+  var down = el('button', {class:'thumb', type:'button', text:'👎'});
+  function submit(rating){
+    up.classList.toggle('active-up', rating === 'up');
+    down.classList.toggle('active-down', rating === 'down');
+    status.textContent = '…';
+    api('/feedback', {method:'POST', json:{
+      project_id: projectId, task_id: taskId, agent: agent, rating: rating, note: note.value.trim() || null
+    }}).then(function(){ status.textContent = 'ثبت شد.'; }).catch(function(e){ status.textContent = e.message; });
+  }
+  up.addEventListener('click', function(){ submit('up'); });
+  down.addEventListener('click', function(){ submit('down'); });
+  wrap.appendChild(el('span', {class:'muted', text:'این پاسخ به‌دردخور بود؟'}));
+  wrap.appendChild(up); wrap.appendChild(down); wrap.appendChild(note); wrap.appendChild(status);
+  return wrap;
+}
+
+/* ============================== inbox ============================== */
+
+function renderInbox(root){
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:'صندوق تصمیم‌ها'})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+
+  function load(){
+    clear(body); body.appendChild(loadingBox());
+    api('/inbox').then(function(items){
+      clear(body);
+      refreshInboxBadge();
+      if (!items.length){
+        body.appendChild(emptyBox('📥', 'چیزی منتظر تو نیست', 'وقتی برنامه‌ای یا نقطه‌ی تصمیمی منتظر بماند، اینجا نشان داده می‌شود.'));
+        return;
+      }
+      items.forEach(function(it){ body.appendChild(inboxCard(it, load)); });
+    }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message, load)); });
+  }
+  load();
+}
+
+function inboxCard(item, onDone){
+  var card = el('div', {class:'card stack inbox-card'});
+  card.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+    el('span', {class:'kind', text: item.kind === 'plan' ? 'برنامه در انتظار تأیید' : 'نقطه‌ی تصمیم'}),
+    el('button', {class:'chip', style:'cursor:pointer;border:0', onclick:function(){ go('projects/' + item.project_id); }}, item.project_title)));
+  card.appendChild(el('p', {}, el('b', {text: item.kind === 'plan' ? 'فهم مدیر: ' : 'چالش: '}), item.challenge));
+
+  if (item.kind === 'plan'){
+    var ol = el('div', {class:'stack', style:'gap:6px'});
+    (item.options || []).forEach(function(o){
+      ol.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+        el('span', {text:o.title}), el('span', {class:'row'}, el('span', {class:'chip', text:o.owner || '?'}), riskChip(o.risk))));
+    });
+    card.appendChild(ol);
+    var fb = el('textarea', {placeholder:'اگر برنامه را قبول نداری، بنویس چه چیزی عوض شود'});
+    var status = el('p', {class:'err muted'});
+    var approveBtn = el('button', {class:'btn', text:'تأیید برنامه'});
+    var rejectBtn = el('button', {class:'btn ghost', text:'رد و بازنویسی'});
+    approveBtn.addEventListener('click', function(){
+      approveBtn.disabled = true;
+      api('/projects/' + item.project_id + '/plan/approve', {method:'POST'}).then(onDone)
+        .catch(function(e){ status.textContent = e.message; approveBtn.disabled = false; });
+    });
+    rejectBtn.addEventListener('click', function(){
+      var f = fb.value.trim();
+      if (!f){ status.textContent = 'بنویس چه چیزی باید عوض شود.'; return; }
+      rejectBtn.disabled = true;
+      api('/projects/' + item.project_id + '/plan/reject', {method:'POST', json:{feedback:f}}).then(onDone)
+        .catch(function(e){ status.textContent = e.message; rejectBtn.disabled = false; });
+    });
+    card.appendChild(el('label', {class:'f'}, 'بازخورد', fb));
+    card.appendChild(el('div', {class:'btn-row'}, approveBtn, rejectBtn));
+    card.appendChild(status);
+  } else {
+    var picked = item.recommended || 0;
+    var group = el('div', {class:'stack', style:'gap:8px', role:'radiogroup'});
+    (item.options || []).forEach(function(o, i){
+      var opt = el('button', {class:'opt', role:'radio', 'aria-checked': String(i === picked)},
+        el('span', {}, el('b', {}, o.title, i === item.recommended ? el('span', {class:'rec', text:'پیشنهاد مدیر'}) : null),
+          el('small', {text:o.tradeoff})));
+      opt.addEventListener('click', function(){
+        picked = i;
+        group.querySelectorAll('.opt').forEach(function(x, xi){ x.setAttribute('aria-checked', String(xi === i)); });
+      });
+      group.appendChild(opt);
+    });
+    card.appendChild(group);
+    if (item.why) card.appendChild(el('p', {class:'muted'}, el('b', {text:'چرا: '}), item.why));
+    var note = el('textarea', {placeholder:'یادداشت (اختیاری)'});
+    card.appendChild(el('label', {class:'f'}, 'یادداشت', note));
+    var status2 = el('p', {class:'err muted'});
+    var decideBtn = el('button', {class:'btn', text:'تأیید و اجرا'});
+    decideBtn.addEventListener('click', function(){
+      decideBtn.disabled = true;
+      api('/projects/' + item.project_id + '/tasks/' + item.task_id + '/decide', {method:'POST', json:{option:picked, note: note.value.trim() || null}})
+        .then(onDone).catch(function(e){ status2.textContent = e.message; decideBtn.disabled = false; });
+    });
+    card.appendChild(el('div', {class:'btn-row'}, decideBtn));
+    card.appendChild(status2);
+  }
+  return card;
+}
 
 /* ============================== dashboard ============================== */
 
@@ -307,12 +426,14 @@ function renderProjectDetail(root, projectId){
   function draw(){
     clear(body);
     var tabs = el('div', {class:'tabs', role:'tablist'},
-      tabBtn('overview', 'بررسی'), tabBtn('tasks', 'وظایف'), tabBtn('events', 'رویدادها'), tabBtn('usage', 'مصرف'));
+      tabBtn('overview', 'بررسی'), tabBtn('tasks', 'وظایف'), tabBtn('chat', 'گفتگو با مدیر'),
+      tabBtn('events', 'رویدادها'), tabBtn('usage', 'مصرف'));
     body.appendChild(tabs);
     var panel = el('div', {class:'stack'});
     body.appendChild(panel);
     if (tab === 'overview') drawOverview(panel);
     else if (tab === 'tasks') drawTasks(panel);
+    else if (tab === 'chat') drawChat(panel);
     else if (tab === 'events') drawEvents(panel);
     else if (tab === 'usage') drawUsage(panel);
   }
@@ -412,7 +533,85 @@ function renderProjectDetail(root, projectId){
     card.appendChild(el('label', {class:'f'}, 'بازخورد برای رد برنامه (اختیاری تا وقتی رد نکرده‌ای)', fb));
     card.appendChild(el('div', {class:'btn-row'}, approveBtn, rejectBtn));
     card.appendChild(status);
+    card.appendChild(feedbackWidget(projectId, 'manager', null));
     return card;
+  }
+
+  function drawChat(panel){
+    var card = el('div', {class:'card'});
+    var list = el('div', {class:'chat-list'});
+    card.appendChild(list);
+    panel.appendChild(card);
+    var input = el('textarea', {placeholder:'به مدیر چه می‌خواهی بگویی؟'});
+    var sendBtn = el('button', {class:'btn', text:'ارسال'});
+    var status = el('p', {class:'err muted'});
+    panel.appendChild(el('div', {class:'card stack'},
+      el('div', {class:'chat-input-row'}, input, sendBtn), status));
+
+    function suggestedActionButton(action){
+      var m = /^checkpoint:(\d+)$/.exec(action);
+      var b = el('button', {class:'btn sm'});
+      if (action === 'plan'){
+        b.textContent = tasks.length ? 'برنامه‌ریزی دوباره' : 'برنامه بریز';
+        b.addEventListener('click', function(){
+          b.disabled = true;
+          api('/projects/' + projectId + '/plan', {method:'POST'})
+            .then(function(){ tab = 'overview'; return reload(); })
+            .catch(function(e){ alert(e.message); b.disabled = false; });
+        });
+      } else if (action === 'approve'){
+        b.textContent = 'تأیید برنامه';
+        b.addEventListener('click', function(){
+          b.disabled = true;
+          api('/projects/' + projectId + '/plan/approve', {method:'POST'})
+            .then(function(){ tab = 'overview'; return reload(); })
+            .catch(function(e){ alert(e.message); b.disabled = false; });
+        });
+      } else if (m){
+        var tid = Number(m[1]);
+        b.textContent = 'باز کردن نقطه‌ی تصمیم';
+        b.addEventListener('click', function(){
+          b.disabled = true;
+          api('/projects/' + projectId + '/tasks/' + tid + '/checkpoint', {method:'POST'})
+            .then(function(){ tab = 'tasks'; return reload(); })
+            .catch(function(e){ alert(e.message); b.disabled = false; });
+        });
+      } else {
+        return null;
+      }
+      return b;
+    }
+
+    function chatBubble(m){
+      var wrap = el('div', {class:'stack', style:'gap:6px;align-items:' + (m.role === 'user' ? 'flex-end' : 'flex-start')});
+      wrap.appendChild(el('div', {class:'chat-msg role-' + m.role}, m.text, el('span', {class:'chat-time', text:fmtTime(m.created_at)})));
+      if (m.role === 'manager'){
+        var actionBtn = m.suggested_action ? suggestedActionButton(m.suggested_action) : null;
+        if (actionBtn) wrap.appendChild(actionBtn);
+        wrap.appendChild(feedbackWidget(projectId, 'manager', null));
+      }
+      return wrap;
+    }
+
+    function loadMessages(){
+      clear(list); list.appendChild(loadingBox());
+      api('/projects/' + projectId + '/chat').then(function(msgs){
+        clear(list);
+        if (!msgs.length){ list.appendChild(el('p', {class:'muted', text:'هنوز گفتگویی نیست؛ چیزی از مدیر بپرس.'})); return; }
+        msgs.forEach(function(m){ list.appendChild(chatBubble(m)); });
+        list.scrollTop = list.scrollHeight;
+      }).catch(function(e){ clear(list); list.appendChild(errorBox(e.message, loadMessages)); });
+    }
+
+    sendBtn.addEventListener('click', function(){
+      var text = input.value.trim();
+      if (!text) return;
+      sendBtn.disabled = true; status.textContent = '';
+      api('/projects/' + projectId + '/chat', {method:'POST', json:{text:text}})
+        .then(function(){ input.value = ''; sendBtn.disabled = false; loadMessages(); })
+        .catch(function(e){ status.textContent = e.message; sendBtn.disabled = false; });
+    });
+    loadMessages();
   }
 
   function drawTasks(panel){
@@ -487,6 +686,7 @@ function renderProjectDetail(root, projectId){
     });
     box.appendChild(el('div', {class:'btn-row'}, decideBtn));
     box.appendChild(status);
+    box.appendChild(feedbackWidget(projectId, 'manager', t.id));
     return box;
   }
 
@@ -538,13 +738,52 @@ function renderAgentDetail(root, name){
   root.appendChild(el('div', {class:'page-head'},
     el('button', {class:'btn ghost sm', onclick:function(){ go('agents'); }}, '← ایجنت‌ها'),
     el('h2', {text:name})));
+  var tabsHolder = el('div', {class:'tabs', role:'tablist'});
   var body = el('div', {class:'stack'});
+  root.appendChild(tabsHolder);
   root.appendChild(body);
   body.appendChild(loadingBox());
 
-  Promise.all([api('/agents/' + encodeURIComponent(name)), api('/skills')]).then(function(r){
-    var agent = r[0], allSkills = r[1];
+  var tab = 'overview', agentData = null, skillsData = null, feedbackCount = null;
+
+  function tabBtn(key, label){
+    var b = el('button', {class:'tab' + (tab === key ? ' active' : ''), role:'tab', text:label});
+    b.addEventListener('click', function(){ tab = key; drawTabs(); draw(); });
+    return b;
+  }
+  function drawTabs(){
+    clear(tabsHolder);
+    tabsHolder.appendChild(tabBtn('overview', 'بررسی'));
+    tabsHolder.appendChild(tabBtn('feedback', 'آموزش' + (feedbackCount !== null ? ' (' + fmtNum(feedbackCount) + ')' : '')));
+  }
+  function draw(){
     clear(body);
+    if (tab === 'overview') drawOverview(body);
+    else drawFeedback(body);
+  }
+
+  function drawFeedback(panel){
+    panel.appendChild(loadingBox());
+    api('/agents/' + encodeURIComponent(name) + '/feedback').then(function(list){
+      feedbackCount = list.length;
+      drawTabs();
+      clear(panel);
+      if (!list.length){ panel.appendChild(emptyBox('🎓', 'هنوز بازخوردی ثبت نشده', 'زیر پاسخ‌های این ایجنت می‌توانی امتیاز بدهی.')); return; }
+      var card = el('div', {class:'card'});
+      list.forEach(function(f){
+        card.appendChild(el('div', {class:'stack', style:'gap:4px;padding-block:8px;border-top:1px solid var(--line)'},
+          el('div', {class:'row', style:'justify-content:space-between'},
+            el('span', {class:'chip', text: f.rating === 'up' ? '👍 مثبت' : '👎 منفی'}),
+            el('time', {class:'muted', text:fmtTime(f.created_at)})),
+          f.note ? el('p', {text:f.note}) : null,
+          f.task_id ? el('span', {class:'muted', text:'وظیفه‌ی #' + f.task_id}) : null));
+      });
+      panel.appendChild(card);
+    }).catch(function(e){ clear(panel); panel.appendChild(errorBox(e.message, function(){ drawFeedback(panel); })); });
+  }
+
+  function drawOverview(panel){
+    var agent = agentData, allSkills = skillsData, body = panel;
     body.appendChild(el('div', {class:'card stack'},
       el('p', {text: agent.description}),
       el('div', {class:'row'},
@@ -589,6 +828,12 @@ function renderAgentDetail(root, name){
       skillsCard.appendChild(wrap);
     });
     body.appendChild(skillsCard);
+  }
+
+  drawTabs();
+  Promise.all([api('/agents/' + encodeURIComponent(name)), api('/skills')]).then(function(r){
+    agentData = r[0]; skillsData = r[1];
+    draw();
   }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message)); });
 }
 

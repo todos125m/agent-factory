@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app import manager
+from app import chat, manager
 from app.db import get_session
 from app.gateway.providers import ProviderError
 from app.gateway.service import BudgetExceeded, Gateway
 from app.manager import ManagerError
 from app.routers.projects import load_project
 from app.routers.tasks import load_task
-from app.schemas import TaskOut
+from app.schemas import ChatMessageOut, ChatTurnOut, TaskOut
 from app.state_machine import TransitionError
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["manager"])
@@ -39,6 +39,10 @@ class PlanReject(BaseModel):
 class DecisionIn(BaseModel):
     option: int
     note: str | None = None
+
+
+class ChatIn(BaseModel):
+    text: str
 
 
 @router.post("/plan")
@@ -80,3 +84,17 @@ def decide(project_id: int, tid: int, body: DecisionIn, session: Session = Depen
     except TransitionError as e:
         raise HTTPException(409, str(e)) from e
     return task
+
+
+@router.post("/chat", response_model=ChatTurnOut)
+def send_chat(
+    project_id: int, body: ChatIn, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+):
+    project = load_project(session, project_id)
+    return _run(chat.send_message, session, gateway, project, body.text)
+
+
+@router.get("/chat", response_model=list[ChatMessageOut])
+def list_chat(project_id: int, session: Session = Depends(get_session)):
+    project = load_project(session, project_id)
+    return chat.list_messages(session, project)

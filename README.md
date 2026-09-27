@@ -29,7 +29,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| UI shell | Admin panel wired to the real API — dashboard, projects (create/plan/checkpoints/events/usage), agents, layered settings, observability | ✅ (`web/`, served at `/app`) |
+| UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
 
@@ -39,6 +39,9 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost:8000/app for the UI
 pytest
 ```
+
+The UI (`/app`) creates a default owner automatically on first open (no setup step) and is an installable
+PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gives it its own icon.
 
 Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
 (see `.env.example`).
@@ -79,6 +82,14 @@ The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 
 Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502);
 executing the specialist itself is Phase 4.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/projects/{id}/chat` | Owner ↔ manager chat: one `Gateway.call` (goal + compact task list + last 8 messages) → `{reply, suggested_action}`; the UI only ever shows a button for the suggested action, never auto-executes it |
+| GET  | `/projects/{id}/chat` | Chat history for the project |
+| GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval and checkpoints awaiting a decision — derived from existing events, nothing new stored |
+| POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |
+| GET  | `/agents/{name}/feedback` | Feedback recorded for one agent; turning it into skill updates is a later phase |
 
 ## Infrastructure API
 

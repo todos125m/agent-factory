@@ -139,6 +139,54 @@ class AgentOut(ORM):
     active: bool
 
 
+class ChatMessageIn(BaseModel):
+    text: str
+
+
+class ChatMessageOut(ORM):
+    id: int
+    project_id: int
+    role: str
+    text: str
+    suggested_action: str | None
+    created_at: datetime
+
+
+class ChatTurnOut(BaseModel):
+    user: ChatMessageOut
+    manager: ChatMessageOut
+
+
+class FeedbackIn(BaseModel):
+    project_id: int
+    task_id: int | None = None
+    agent: str
+    rating: str = Field(pattern=r"^(up|down)$")
+    note: str | None = None
+
+
+class FeedbackOut(ORM):
+    id: int
+    project_id: int
+    task_id: int | None
+    agent: str
+    rating: str
+    note: str | None
+    created_at: datetime
+
+
+class InboxItem(BaseModel):
+    kind: str  # "plan" | "checkpoint"
+    project_id: int
+    project_title: str
+    task_id: int | None = None
+    challenge: str
+    options: list[dict[str, Any]]
+    recommended: int | None
+    why: str
+    created_at: datetime
+
+
 class UsageOut(BaseModel):
     calls: int
     input_tokens: int

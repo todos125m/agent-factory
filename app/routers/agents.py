@@ -4,9 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Agent, Skill
+from app.models import Agent, Feedback, Skill
 from app.registry import AgentSpec, RegistryError, find_by_capability, upsert_agent
-from app.schemas import AgentOut, SkillOut, SkillSummary
+from app.schemas import AgentOut, FeedbackOut, SkillOut, SkillSummary
 
 router = APIRouter(tags=["registry"])
 
@@ -37,6 +37,11 @@ def register_agent(body: dict, session: Session = Depends(get_session)):
         raise HTTPException(422, str(e)) from e
     session.commit()
     return agent
+
+
+@router.get("/agents/{name}/feedback", response_model=list[FeedbackOut])
+def agent_feedback(name: str, session: Session = Depends(get_session)):
+    return session.scalars(select(Feedback).where(Feedback.agent == name).order_by(Feedback.id.desc())).all()
 
 
 @router.get("/skills", response_model=list[SkillSummary])
