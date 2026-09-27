@@ -1,5 +1,8 @@
 # Agent Factory — notes for Claude
 
+- **Owner's engineering standard is mandatory for every task: read `docs/ENGINEERING_STANDARD.md` first.**
+  Nothing is "done" without evidence; finish with its 9-part final report (in Persian).
+
 - The source of truth for design is `docs/ARCHITECTURE.md` (Persian). Build in the order of its §52 phases;
   the README status table tracks progress — update it when a phase lands.
 - `docs/AGENT_PRINCIPLES.md` defines the six engines (Persona, Knowledge Boundary, Action, Observation, Memory,

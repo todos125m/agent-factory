@@ -2,7 +2,7 @@
 
 A scheduled supervisor session takes the FIRST unchecked item whose prerequisites are done,
 completes it, checks it off here, and pushes. One item per run. Never start anything not listed.
-Rules: follow CLAUDE.md (skills playbook, token discipline); tests with FakeProvider only (no real
+Rules: follow docs/ENGINEERING_STANDARD.md (mandatory: evidence-based done, adversarial pass, security review) and CLAUDE.md (skills playbook, token discipline); tests with FakeProvider only (no real
 model calls); `git pull --rebase` before starting and before pushing; branch
 `claude/eager-pascal-xpx6wk`; `/code-review` your diff before pushing; keep each item small.
 
@@ -19,4 +19,4 @@ model calls); `git pull --rebase` before starting and before pushing; branch
 - [ ] 4. OpenAI provider adapter (owner decision d7: multi-provider) using the official `openai`
       SDK in its own file; key from OPENAI_API_KEY; usage mapping; mocked tests.
 - [ ] 5. Update README status + a short Persian morning summary at the top of this file
-      (what was done, test count, what needs the owner).
+      using the 9-part final report from docs/ENGINEERING_STANDARD.md (what was actually verified, failures found, remaining risks, production readiness).
