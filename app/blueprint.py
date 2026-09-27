@@ -50,6 +50,9 @@ def validate_blueprint(data: dict[str, Any]) -> list[str]:
     for field in ("name", "description", "model_role", "agent_type", "capabilities"):
         if field not in core:
             issues.append(f"agent_core.{field}: required")
+    for field in ("name", "description"):
+        if field in core and not str(core[field]).strip():
+            issues.append(f"agent_core.{field}: must not be empty")
     agent_type = core.get("agent_type")
     if agent_type is not None and agent_type not in AGENT_TYPES:
         issues.append(f"agent_core.agent_type: must be one of {sorted(AGENT_TYPES)}")
@@ -63,6 +66,8 @@ def validate_blueprint(data: dict[str, Any]) -> list[str]:
         for field in ("name", "knows", "does_not_understand", "patience", "goals"):
             if field not in persona:
                 issues.append(f"persona.{field}: required for agent_type=persona")
+        if "name" in persona and not str(persona["name"]).strip():
+            issues.append("persona.name: must not be empty")
         if "patience" in persona and persona["patience"] not in PATIENCE_LEVELS:
             issues.append(f"persona.patience: must be one of {sorted(PATIENCE_LEVELS)}")
         if "goals" in persona and not persona["goals"]:

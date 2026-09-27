@@ -104,3 +104,17 @@ def test_missing_budget_is_rejected():
     data = {**VALID_SPECIALIST, "security": {"permissions": VALID_SPECIALIST["security"]["permissions"], "budget": {}}}
     issues = validate_blueprint(data)
     assert any(i.startswith("security.budget") for i in issues)
+
+
+def test_blank_name_and_description_are_rejected():
+    data = {**VALID_SPECIALIST, "agent_core": {**VALID_SPECIALIST["agent_core"], "name": "", "description": "  "}}
+    issues = validate_blueprint(data)
+    assert any(i.startswith("agent_core.name") for i in issues)
+    assert any(i.startswith("agent_core.description") for i in issues)
+
+
+def test_blank_persona_name_is_rejected():
+    data = _with_persona()
+    data["persona"] = {**data["persona"], "name": " "}
+    issues = validate_blueprint(data)
+    assert any(i.startswith("persona.name") for i in issues)

@@ -1,3 +1,4 @@
+from app.blueprint import validate_blueprint
 from app.interview import build_blueprint, load_questions, next_question
 
 
@@ -98,3 +99,33 @@ def test_interview_answer_endpoint_rejects_body_without_target(client):
 def test_build_blueprint_normalizes_persian_digits_in_budget():
     blueprint = build_blueprint({"security.budget.max_cost": "۲.۵"})
     assert blueprint["security"]["budget"]["max_cost"] == 2.5
+
+
+def test_build_blueprint_treats_missing_list_answer_as_empty():
+    blueprint = build_blueprint({"agent_core.capabilities": None})
+    assert blueprint["agent_core"]["capabilities"] == []
+
+
+def test_empty_name_and_description_fail_validation():
+    answers = {
+        "agent_core.agent_type": "specialist",
+        "agent_core.name": "",
+        "agent_core.description": "   ",
+        "agent_core.model_role": "research",
+        "agent_core.capabilities": "research",
+        "knowledge_boundary.allowed_sources": ["task.input"],
+        "action_engine.actions": "research",
+        "tools_plugins.tools": ["web_search"],
+        "memory.long_term_sources": "",
+        "external_integrations.services": "",
+        "orchestration.approval_gate": "checkpoint",
+        "security.permissions.network": False,
+        "security.permissions.repo_write": False,
+        "security.permissions.deploy": False,
+        "security.budget.max_cost": "1",
+        "scalability.evaluation": "clear answers",
+    }
+    blueprint = build_blueprint(answers)
+    issues = validate_blueprint(blueprint)
+    assert any(i.startswith("agent_core.name") for i in issues)
+    assert any(i.startswith("agent_core.description") for i in issues)

@@ -84,6 +84,8 @@ def _normalize_digits(value: Any) -> Any:
 
 
 def _split_list(value: Any) -> list[str]:
+    if value is None:
+        return []
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
     return [part.strip() for part in str(value).replace("،", ",").split(",") if part.strip()]
