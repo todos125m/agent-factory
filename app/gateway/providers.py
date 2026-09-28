@@ -128,6 +128,10 @@ class ClaudeAccountProvider:
     OAuth credentials, which is the whole point of this provider, so it's not used here.
     Authentication is whatever `claude` itself resolves: a local `claude login` session, or
     CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`) in the environment.
+    `--permission-mode dontAsk` denies any tool call that would need a person's approval and pins that
+    mode over the owner's own `defaultMode` setting. `--permission-prompts none` is not used: it needs
+    CLI v2.1.259 or later and older CLIs reject it as an unknown option, which failed every call on
+    CLI 2.1.185 (code.claude.com/docs/en/headless).
     """
 
     name = "claude_account"
@@ -151,12 +155,12 @@ class ClaudeAccountProvider:
             "--system-prompt", request.system,
             "--model", request.model,
             "--max-turns", str(max_turns),
-            "--permission-prompts", "none",
+            "--permission-mode", "dontAsk",
             "--safe-mode",
         ]
         if request.web_search:
             # Only the built-in web search tool, explicitly pre-approved so it runs without a human
-            # in the loop (--permission-prompts none would otherwise deny it) — nothing else on.
+            # in the loop (dontAsk would otherwise deny it) — nothing else on.
             args += ["--tools", "WebSearch", "--allowedTools", "WebSearch"]
         else:
             # No built-in tools: a role completion is one answer, not an agent loop. With tools on, a
@@ -170,8 +174,11 @@ class ClaudeAccountProvider:
 
         with tempfile.TemporaryDirectory(prefix="agent-factory-claude-account-") as cwd:
             try:
+                # The CLI writes UTF-8; text=True alone would decode with the OS locale (cp1252 on Windows),
+                # garbling Persian replies or failing outright ("ف" is byte 0x81, undefined in cp1252).
                 proc = subprocess.run(
-                    args, cwd=cwd, capture_output=True, text=True, timeout=self.timeout_s, stdin=subprocess.DEVNULL,
+                    args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=self.timeout_s, stdin=subprocess.DEVNULL,
                 )
             except FileNotFoundError as e:
                 raise ProviderError("Claude Code CLI not found; install it or set model_access to 'api_key'") from e

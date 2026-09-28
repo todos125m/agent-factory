@@ -222,7 +222,8 @@ def test_claude_account_enables_only_websearch_and_scales_max_turns():
 
     args = run.call_args.args[0]
     assert args[args.index("--tools") + 1] == "WebSearch"
-    assert args[args.index("--allowedTools") + 1] == "WebSearch"
+    assert args[args.index("--allowedTools") + 1] == "WebSearch"  # pre-approved: dontAsk denies everything else
+    assert args[args.index("--permission-mode") + 1] == "dontAsk"
     assert args[args.index("--max-turns") + 1] == "7"  # 3 base + 4 max_uses
     assert r.web_searches == 2  # summed across modelUsage, not the top-level usage block
 

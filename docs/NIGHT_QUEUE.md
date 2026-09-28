@@ -182,10 +182,15 @@ each item (the laptop uses the owner's own Claude account, `model_access: claude
       reverted. `pytest -q` 195/195 green. `/code-review` (high): no bug in this diff; out-of-scope issues
       raised separately — manager decide/auto-decide paths ignore `project.paused` (pre-existing, more
       reachable now), settings-layer values are unvalidated (a typo'd `mode` overrides the project's).
-      Real-model check with the owner's Claude account: BLOCKED — the local Claude Code CLI 2.1.185
-      rejects the `claude_account` provider's `--permission-prompts none` ("unknown option"), so the plan
-      call failed before reaching a model (ModelCall ok=false, 0 tokens, $0). Needs the owner's decision
-      (CLI version vs. provider flag); not changed here.
+      Real-model check with the owner's Claude account: first blocked — the local Claude Code CLI 2.1.185
+      rejected the provider's `--permission-prompts none` (that flag needs CLI 2.1.259+), so every call
+      failed before reaching a model (ModelCall ok=false, 0 tokens, $0). Owner-approved fix (2026-09-28):
+      the provider now passes `--permission-mode dontAsk` (denies anything not pre-approved on old and new
+      CLIs, and pins that over the owner's own `defaultMode`) and decodes the CLI's stdout as UTF-8 — on
+      Windows `text=True` used cp1252, so a Persian reply crashed the call (500); seen as "Â·" mojibake in a
+      real error. `/security-review`: no issue. The real plan call then passed argument parsing and stopped
+      at "Not logged in": the standalone `claude` CLI on this machine has no login (`claude auth status`:
+      loggedIn=false). Pending: the owner logs the CLI in, then one plan + one checkpoint.
 - [x] 7. **Source quality, not just source presence.** The FACT guard (manager.py ~L68) only checks
       that a URL exists; a real run labeled a restaurant blog's survey as FACT. Add a deterministic
       source tier per URL (e.g. official/academic/stats bodies > app stores/company pages > blogs/

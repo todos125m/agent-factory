@@ -1,6 +1,8 @@
 """Mode B: Claude via the owner's subscription (Claude Code CLI headless mode). No real CLI calls here."""
 
+import json
 import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -35,6 +37,28 @@ def test_complete_maps_result_and_usage_and_zeroes_cost():
     # fail with error_max_turns (real researcher run, 2026-09-28). Tools must be disabled.
     assert args[args.index("--tools") + 1] == ""
     assert args[args.index("--max-turns") + 1] == "3"  # 1 failed real structured-output runs
+    # Regression: `--permission-prompts` needs CLI v2.1.259+; CLI 2.1.185 rejected it and failed every
+    # call (real run, 2026-09-28). dontAsk denies anything unapproved on old and new CLIs alike.
+    assert args[args.index("--permission-mode") + 1] == "dontAsk"
+    assert "--permission-prompts" not in args and "--dangerously-skip-permissions" not in args
+
+
+def test_utf8_output_is_decoded_as_utf8_whatever_the_os_locale():
+    """Regression (real run on Windows, 2026-09-28): text=True alone decodes the CLI's UTF-8 stdout with
+    the locale codec (cp1252 there), so Persian replies came back garbled or failed to decode at all."""
+    persian = "فرضیه"  # «فرضیه»; «ف» is byte 0x81 in UTF-8, undefined in cp1252
+    payload = json.dumps({"is_error": False, "result": persian, "structured_output": {"reply": persian},
+                          "usage": {}}, ensure_ascii=False).encode("utf-8")
+    real_run = subprocess.run
+
+    def real_child(args, **kwargs):  # a real process writing UTF-8 bytes, decoded with the provider's own kwargs
+        return real_run([sys.executable, "-c", f"import sys; sys.stdout.buffer.write({payload!r})"], **kwargs)
+
+    req = ModelRequest(model="m", system="s", user="u", max_output_tokens=10, json_schema={"type": "object"})
+    with patch("shutil.which", return_value="/usr/bin/claude"), patch("subprocess.run", side_effect=real_child) as run:
+        r = ClaudeAccountProvider().complete(req)
+    assert run.call_args.kwargs["encoding"] == "utf-8"
+    assert r.text == persian and r.data == {"reply": persian}
 
 
 def test_complete_reads_structured_output_when_schema_requested():
