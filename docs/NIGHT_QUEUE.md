@@ -1,5 +1,52 @@
 # Night queue — autonomous work the owner already approved
 
+## خلاصه صبحگاهی (۲۸ سپتامبر ۲۰۲۶)
+
+۱. **مسئله**: تکمیل فاز ۴ (اولین agentهای متخصص) که در طول شب لند شد، و سپس اجرای صف کارهای شب
+   تأییدشده (این فایل) — یک آیتم در هر نوبت، هرکدام با `/code-review` قبل از push.
+
+۲. **زمینه/تصمیم‌ها**: آیتم ۲ تصمیم owner d12 (تب سنجش)، آیتم ۳ و ۴ تصمیم d7 (گیتوی چندارائه‌دهنده).
+   هیچ فراخوانی واقعی مدل انجام نشد؛ همه‌چیز با FakeProvider یا mock تست شد.
+
+۳. **تغییرات** (۴ آیتم، ۴ commit روی `claude/eager-pascal-xpx6wk`):
+   - آیتم ۱: تأیید لندشدن فاز ۴ (پژوهشگر/مشتری/استراتژی/محصول + `/tasks/{id}/run`).
+   - آیتم ۲: تب «سنجش» — مقایسه‌ی provider/model/effort روی یک هدف ثابت، با توکن/هزینه/زمان/
+     اعتبار schema و امتیاز مالک؛ به `Gateway.call` قابلیت override مسیر اضافه شد.
+   - آیتم ۳: provider محلی و رایگان Ollama (`/api/chat`)، سوییچ سه‌حالته‌ی `model_access` در UI.
+   - آیتم ۴: provider رسمی OpenAI (Chat Completions API) در فایل جداگانه‌ی خودش.
+
+۴. **معماری**: هر سه provider جدید همان الگوی موجود (`Provider` protocol در `app/gateway/providers.py`،
+   `ModelRequest`/`ModelResponse`/`Usage`) را دنبال می‌کنند؛ هیچ‌کدام مستقیم توسط agent فراخوانی
+   نمی‌شوند — همه از `Gateway.call` رد می‌شوند (بودجه‌چک + لاگ `ModelCall`، طبق CLAUDE.md).
+
+۵. **تأیید (Verification)**: تعداد تست از ۸۴ (شروع شب) به ۱۴۸ رسید — همه سبز (`pytest -q`).
+   شکل درخواست/پاسخ Ollama و OpenAI از داکیومنت رسمی/SDK واقعی تأیید شد (WebFetch/WebSearch، نه
+   حافظه)؛ Ollama با یک سرور HTTP واقعی (نه mock) دوبار تست شد؛ SDK واقعی OpenAI یک‌بار نصب و
+   امضای `chat.completions.create` بررسی شد، سپس حذف شد تا محیط با `pip install -e ".[dev]"` یکی بماند.
+
+۶. **اشکالات پیداشده و رفع‌شده** (توسط `/code-review`، مجموعاً ~۲۰ مورد در ۴ آیتم؛ مهم‌ترین‌ها):
+   بای‌پس اعتبارسنجی interview (پاسخ خالی/None)؛ race در محاسبه‌ی هزینه‌ی سنجش (رفع با برگرداندن
+   cost/duration از خود Gateway)؛ نبود سقف بودجه برای سنجش؛ `OLLAMA_BASE_URL` خالی که URL نسبی
+   می‌ساخت؛ نادیده‌گرفتن سقف توکن خروجی در Ollama؛ `strict:true` در OpenAI که هر فراخوانی واقعی را رد
+   می‌کرد (schemaهای خود پروژه فیلد اختیاری دارند)؛ نبود قیمت مدل‌های OpenAI که چک بودجه را بی‌اثر
+   می‌کرد؛ دوبار-محاسبه‌ی هزینه‌ی توکن کش‌شده‌ی OpenAI.
+
+۷. **ریسک‌های باقی‌مانده**: قیمت‌های OpenAI و نسبت تخفیف کش (۰.۱x، مدل Anthropic) تخمینی‌اند و باید
+   قبل از تکیه‌ی مالی روی آن‌ها با داشبورد واقعی OpenAI چک شوند؛ Ollama و OpenAI هرگز با حساب/سرور
+   واقعی owner تست نشده‌اند (فقط mock/HTTP-mock)؛ سرویس `ollama` در docker-compose هرگز واقعاً
+   `docker compose up` نشده (فقط YAML آن اعتبارسنجی شد)؛ منطق نرمال‌سازی truncation در سه فایل
+   provider تکرار شده (کاندید `/simplify`، نه باگ).
+
+۸. **کار باقی‌مانده**: آیتم ۵ همین (این خلاصه + README) — با این commit کامل می‌شود. صف شب برای
+   امشب تمام است؛ آیتم‌های آینده باید توسط owner یا یک صف جدید اضافه شوند.
+
+۹. **آمادگی Production**: کد و تست‌ها آماده‌اند (۱۴۸/۱۴۸ سبز)، اما **COMPLETED واقعی روی زیرساخت
+   واقعی owner اعلام نمی‌شود** تا زمانی‌که حداقل یک اجرای واقعی (نه mock) روی هرکدام از Ollama/OpenAI
+   با کلید/سرور واقعی owner انجام و دیده شود. تا آن زمان: قابل‌استفاده در dev/test، نه برای spend واقعی
+   بدون بازبینی دستی قیمت‌ها.
+
+---
+
 A scheduled supervisor session takes the FIRST unchecked item whose prerequisites are done,
 completes it, checks it off here, and pushes. One item per run. Never start anything not listed.
 Rules: follow docs/ENGINEERING_STANDARD.md (mandatory: evidence-based done, adversarial pass, security review) and CLAUDE.md (skills playbook, token discipline); tests with FakeProvider only (no real
@@ -95,5 +142,10 @@ model calls); `git pull --rebase` before starting and before pushing; branch
       `chat.completions.create` signature was checked twice (fresh install) to confirm every kwarg this
       provider sends (`max_completion_tokens`, `response_format`, `reasoning_effort`) is genuinely
       accepted. No real OpenAI API calls in tests.
-- [ ] 5. Update README status + a short Persian morning summary at the top of this file
+- [x] 5. Update README status + a short Persian morning summary at the top of this file
       using the 9-part final report from docs/ENGINEERING_STANDARD.md (what was actually verified, failures found, remaining risks, production readiness).
+      Done 2026-09-28: README's Model Gateway row updated (Anthropic/claude_account/Ollama/OpenAI,
+      no longer "OpenAI adapter pending"), UI shell row mentions benchmark comparison; the 9-part
+      Persian morning summary above covers items 1-4 (changes, architecture, verification, failures
+      found and fixed, remaining risks, production readiness). This is a docs-only change; `pytest -q`
+      re-run to confirm still 148/148 green before push (evidence, not assumption).

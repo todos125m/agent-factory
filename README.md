@@ -23,14 +23,14 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 3 — Agent Registry | Agent schema, capabilities, tools, permissions, versions | ✅ (base) |
 | Agent Blueprint | Mandatory 14-section standard (`docs/AGENT_BLUEPRINT.md`), schema validator, guided interview | ✅ |
 | 4 — First Agents | Research, Customer, Strategy, Product; task execution (`/tasks/{id}/run`) | ✅ (base — no tools yet) |
-| 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic; OpenAI adapter pending) |
+| 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic, claude_account, Ollama, OpenAI) |
 | 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
 | 7 — Memory | Project state, decisions, retrieval, learning memory | |
 | 8 — Learning UX | Learning Trace, Ask Why, Try It Myself | |
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, observability, installable PWA | ✅ (`web/`, served at `/app`) |
+| UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
 
