@@ -9,8 +9,19 @@ from sqlalchemy.orm import Session
 from app import settings_layers
 from app.events import record_event
 from app.gateway.pricing import cost_usd
-from app.gateway.providers import ModelRequest, ModelResponse, Provider, ProviderError, default_providers
+from app.gateway.providers import (
+    ModelRequest,
+    ModelResponse,
+    Provider,
+    ProviderError,
+    WebSearchConfig,
+    default_providers,
+)
 from app.models import ModelCall
+
+# Hard ceiling regardless of settings (owner's directive): a misconfigured or malicious settings
+# layer must never grant an agent more than this many searches per call.
+WEB_SEARCH_HARD_CEILING = 10
 
 
 class BudgetExceeded(RuntimeError):
@@ -40,6 +51,8 @@ class Gateway:
         project_id: int | None = None,
         task_id: int | None = None,
         agent: str | None = None,
+        tools: list[str] | None = None,
+        permissions: dict[str, Any] | None = None,
         json_schema: dict[str, Any] | None = None,
         route: dict[str, Any] | None = None,
     ) -> ModelResponse:
@@ -58,6 +71,19 @@ class Gateway:
             estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
             self._check_budget(project_id, task_id, budget, estimate)
 
+        web_search = None
+        if tools and "web_search" in tools:
+            if not (permissions or {}).get("network"):
+                raise ProviderError(
+                    f"agent '{agent}' declares tool 'web_search' but its permissions.network is not "
+                    "true; grant network permission or remove the tool"
+                )
+            requested = int(budget.get("max_web_searches", 5))
+            # requested <= 0 disables search for this call (an owner-facing budget knob, distinct
+            # from the tool/permission check above) rather than being floored up to a minimum of 1.
+            if requested > 0:
+                web_search = WebSearchConfig(max_uses=min(requested, WEB_SEARCH_HARD_CEILING))
+
         request = ModelRequest(
             model=route["model"],
             system=system,
@@ -65,6 +91,7 @@ class Gateway:
             max_output_tokens=max_out,
             json_schema=json_schema,
             effort=route.get("effort"),
+            web_search=web_search,
         )
         started = time.monotonic()
         call = ModelCall(
@@ -82,6 +109,7 @@ class Gateway:
         u = response.usage
         call.input_tokens, call.output_tokens = u.input_tokens, u.output_tokens
         call.cache_read_tokens, call.cache_write_tokens = u.cache_read_tokens, u.cache_write_tokens
+        call.web_searches = response.web_searches
         call.cost_usd = (
             response.cost_usd if response.cost_usd is not None
             else cost_usd(route["model"], u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens)

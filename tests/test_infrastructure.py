@@ -25,7 +25,9 @@ def test_settings_layers_override_in_order(client, project):
     r = client.get("/settings/resolved", params={"task_id": task["id"]}).json()
     assert r["max_steps"] == 2  # task beats global
     assert r["mode"] == "automatic"  # from workspace, found via the task's project
-    assert r["budget"] == {"project_usd": 2.0, "task_usd": 0.5, "max_output_tokens": 2000}  # nested merge
+    assert r["budget"] == {
+        "project_usd": 2.0, "task_usd": 0.5, "max_output_tokens": 2000, "max_web_searches": 5,
+    }  # nested merge
     # The other project (no workspace) only sees global + defaults.
     other = client.get("/settings/resolved", params={"project_id": pid}).json()
     assert other["mode"] == "manual_learning" and other["max_steps"] == 4

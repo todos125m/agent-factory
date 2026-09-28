@@ -299,6 +299,7 @@ class ModelCall(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    web_searches: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     ok: Mapped[bool] = mapped_column(default=True)

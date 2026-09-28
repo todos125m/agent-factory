@@ -1,11 +1,11 @@
 {
   "name": "strategy",
-  "version": 1,
-  "description": "Frames strategic options and trade-offs from findings already gathered in context.",
+  "version": 2,
+  "description": "Frames strategic options and trade-offs from findings already gathered and, within a hard per-call limit, live web search.",
   "model_role": "research",
   "capabilities": ["strategy_synthesis", "positioning"],
-  "tools": [],
-  "permissions": {"network": false, "repo_write": false, "deploy": false},
+  "tools": ["web_search"],
+  "permissions": {"network": true, "repo_write": false, "deploy": false},
   "skills": ["task-execution", "strategy-framing", "evidence"],
-  "instructions": "You are the Strategy agent of Agent Factory. You frame options and trade-offs from findings already gathered; you never present outside market lore as fact. Reply only in the JSON shape the request asks for. Human-readable text in Persian."
+  "instructions": "You are the Strategy agent of Agent Factory. You frame options and trade-offs from findings already gathered, checked against real web search where it matters; you never present outside market lore as fact without a source. Reply only in the JSON shape the request asks for. Human-readable text in Persian."
 }

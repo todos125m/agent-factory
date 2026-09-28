@@ -3,6 +3,7 @@ approval, run per-task decision checkpoints. Deterministic logic (DAG validation
 resolution, state transitions) stays in code; the model only proposes plans and checkpoints.
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -57,6 +58,28 @@ class TaskRunOut(BaseModel):
     findings: list[TaskFinding] = Field(default_factory=list)
     lesson: str
     next: str
+
+
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _apply_evidence_guard(session: Session, project_id: int, task: Task, result: TaskRunOut) -> TaskRunOut:
+    """Deterministic guard (owner's directive): a FACT is only as good as its source. A finding
+    typed FACT whose basis cites no http(s) URL is downgraded to INFERENCE and flagged in place —
+    the model's own evidence labels are advisory, this check is not."""
+    downgraded_claims: list[str] = []
+    findings = []
+    for finding in result.findings:
+        if finding.type == "FACT" and not _URL_RE.search(finding.basis):
+            finding = finding.model_copy(update={
+                "type": "INFERENCE",
+                "basis": f"{finding.basis} [downgraded from FACT: no source URL cited]",
+            })
+            downgraded_claims.append(finding.claim)
+        findings.append(finding)
+    if downgraded_claims:
+        record_event(session, project_id, "evidence.downgraded", task.id, claims=downgraded_claims)
+    return result.model_copy(update={"findings": findings})
 
 
 def manager_agent(session: Session) -> Agent:
@@ -275,12 +298,14 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     user = context.task_context(session, task, settings=task_settings)
     response = gateway.call(
         agent.model_role, system=system, user=user, project_id=project.id, task_id=task.id, agent=agent.name,
+        tools=agent.tools, permissions=agent.permissions,
         json_schema=TaskRunOut.model_json_schema(),
     )
     try:
         result = TaskRunOut.model_validate(response.data)
     except ValidationError as e:
         raise ManagerError(f"invalid task output: {e}") from e
+    result = _apply_evidence_guard(session, project.id, task, result)
 
     task.output = result.model_dump()
     task.status = TaskStatus.COMPLETED

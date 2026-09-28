@@ -45,6 +45,11 @@ class OpenAIProvider:
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:
+        if request.web_search:
+            raise ProviderError(
+                "this OpenAI integration has no web search capability; set model_access to "
+                "'claude_account' or 'api_key' for this role, or remove the 'web_search' tool from the agent"
+            )
         kwargs: dict[str, Any] = {
             "model": request.model,
             "max_completion_tokens": request.max_output_tokens,

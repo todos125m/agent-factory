@@ -259,6 +259,7 @@ class ModelCallOut(ORM):
     output_tokens: int
     cache_read_tokens: int
     cache_write_tokens: int
+    web_searches: int
     cost_usd: float
     duration_ms: int
     ok: bool

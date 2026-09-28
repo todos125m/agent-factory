@@ -12,6 +12,14 @@ from typing import Any, Protocol
 
 
 @dataclass
+class WebSearchConfig:
+    """Attached to a ModelRequest by Gateway.call() only after its deterministic tool/permission
+    check passes (app/gateway/service.py) — never set directly by an agent or the model."""
+
+    max_uses: int
+
+
+@dataclass
 class ModelRequest:
     model: str
     system: str  # stable part: cached where the provider supports it
@@ -19,6 +27,7 @@ class ModelRequest:
     max_output_tokens: int
     json_schema: dict[str, Any] | None = None
     effort: str | None = None
+    web_search: WebSearchConfig | None = None
 
 
 @dataclass
@@ -38,6 +47,7 @@ class ModelResponse:
     stop_reason: str | None = None
     cost_usd: float | None = None  # overrides the gateway's pricing-table estimate when set (e.g. subscription calls)
     duration_ms: int | None = None  # filled in by Gateway.call() after the request completes
+    web_searches: int = 0  # number of web searches the provider actually ran for this call
 
 
 class ProviderError(RuntimeError):
@@ -80,11 +90,20 @@ class AnthropicProvider:
             output_config["format"] = {"type": "json_schema", "schema": request.json_schema}
         if output_config:
             kwargs["output_config"] = output_config
+        if request.web_search:
+            # Server-side tool (current type per docs/claude-api skill, 2026): Anthropic runs the
+            # search and injects results within this same call — no client-side loop needed.
+            kwargs["tools"] = [{
+                "type": "web_search_20260209",
+                "name": "web_search",
+                "max_uses": request.web_search.max_uses,
+            }]
 
         response = self._get_client().messages.create(**kwargs)
         if response.stop_reason == "refusal":
             raise ProviderError("model refused the request")
         text = "".join(b.text for b in response.content if b.type == "text")
+        web_searches = sum(1 for b in response.content if b.type == "server_tool_use" and b.name == "web_search")
         u = response.usage
         usage = Usage(
             input_tokens=u.input_tokens,
@@ -93,7 +112,10 @@ class AnthropicProvider:
             cache_write_tokens=u.cache_creation_input_tokens or 0,
         )
         data = json.loads(text) if request.json_schema and response.stop_reason != "max_tokens" else None
-        return ModelResponse(text=text, usage=usage, model=response.model, data=data, stop_reason=response.stop_reason)
+        return ModelResponse(
+            text=text, usage=usage, model=response.model, data=data, stop_reason=response.stop_reason,
+            web_searches=web_searches,
+        )
 
 
 class ClaudeAccountProvider:
@@ -117,22 +139,30 @@ class ClaudeAccountProvider:
         if binary is None:
             raise ProviderError("Claude Code CLI not found on PATH; install it or set model_access to 'api_key'")
 
+        # Structured output (--json-schema) can take a second turn to emit the schema-valid answer;
+        # with tools disabled the only extra turns are those retries, so 3 is a tight upper bound.
+        # "1" failed real runs with error_max_turns (num_turns=2). Each web search that the CLI runs
+        # (as a haiku sub-agent turn, confirmed against a real run) costs roughly one more turn, so
+        # a request with web search gets that budget added on top, bounded by max_uses.
+        max_turns = 3 + request.web_search.max_uses if request.web_search else 3
         args = [
             binary, "-p", request.user,
             "--output-format", "json",
             "--system-prompt", request.system,
             "--model", request.model,
-            # Structured output (--json-schema) can take a second turn to emit the schema-valid answer;
-            # with tools disabled the only extra turns are those retries, so 3 is a tight upper bound.
-            # "1" failed real runs with error_max_turns (num_turns=2).
-            "--max-turns", "3",
+            "--max-turns", str(max_turns),
             "--permission-prompts", "none",
             "--safe-mode",
+        ]
+        if request.web_search:
+            # Only the built-in web search tool, explicitly pre-approved so it runs without a human
+            # in the loop (--permission-prompts none would otherwise deny it) — nothing else on.
+            args += ["--tools", "WebSearch", "--allowedTools", "WebSearch"]
+        else:
             # No built-in tools: a role completion is one answer, not an agent loop. With tools on, a
             # model that decides to e.g. web-search spends its only turn on the tool call and the CLI
             # fails with error_max_turns (seen in a real run of the researcher role).
-            "--tools", "",
-        ]
+            args += ["--tools", ""]
         if request.effort:
             args += ["--effort", request.effort]
         if request.json_schema:
@@ -140,7 +170,9 @@ class ClaudeAccountProvider:
 
         with tempfile.TemporaryDirectory(prefix="agent-factory-claude-account-") as cwd:
             try:
-                proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=self.timeout_s)
+                proc = subprocess.run(
+                    args, cwd=cwd, capture_output=True, text=True, timeout=self.timeout_s, stdin=subprocess.DEVNULL,
+                )
             except FileNotFoundError as e:
                 raise ProviderError("Claude Code CLI not found; install it or set model_access to 'api_key'") from e
             except subprocess.TimeoutExpired as e:
@@ -165,9 +197,16 @@ class ClaudeAccountProvider:
             cache_read_tokens=raw_usage.get("cache_read_input_tokens", 0),
             cache_write_tokens=raw_usage.get("cache_creation_input_tokens", 0),
         )
+        # WebSearch runs as a sub-agent turn (confirmed against a real run): the top-level usage
+        # block never reports it, but each model entry in modelUsage does, keyed by whichever model
+        # ran that sub-agent (typically a cheaper one, not request.model).
+        web_searches = sum(
+            int(m.get("webSearchRequests") or 0) for m in (payload.get("modelUsage") or {}).values()
+        )
         return ModelResponse(
             text=text, usage=usage, model=request.model, data=data,
             stop_reason=payload.get("subtype"), cost_usd=0.0,  # subscription usage: no per-call API spend
+            web_searches=web_searches,
         )
 
 
@@ -183,6 +222,11 @@ class OllamaProvider:
     timeout_s = 120
 
     def complete(self, request: ModelRequest) -> ModelResponse:
+        if request.web_search:
+            raise ProviderError(
+                "Ollama has no web search capability; set model_access to 'claude_account' or 'api_key' "
+                "for this role, or remove the 'web_search' tool from the agent"
+            )
         # `or` (not just the getenv default) also covers OLLAMA_BASE_URL="" — e.g. .env.example's own
         # unedited line, which os.getenv would otherwise return as-is, breaking the request URL.
         base_url = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")

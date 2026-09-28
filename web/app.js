@@ -1222,6 +1222,7 @@ function renderSettings(root){
       numberField('budget.project_usd', 'بودجه‌ی پروژه (دلار)', '0.01'),
       numberField('budget.task_usd', 'بودجه‌ی هر وظیفه (دلار)', '0.01'),
       numberField('budget.max_output_tokens', 'حداکثر توکن خروجی', '1'),
+      numberField('budget.max_web_searches', 'حداکثر جستجوی وب در هر فراخوانی', '1'),
       numberField('context.max_chars', 'حداکثر کاراکتر زمینه', '1'));
 
     var approvals = el('fieldset', {}, el('legend', {text:'تأییدهای انسانی'}),
@@ -1292,11 +1293,12 @@ function renderObservability(root){
     if (!calls.length){ callCard.appendChild(el('p', {class:'muted', text:'فراخوانی‌ای ثبت نشده.'})); body.appendChild(callCard); return; }
     var wrap = el('div', {class:'table-wrap'});
     var table = el('table', {},
-      el('thead', {}, el('tr', {}, ['نقش','ارائه‌دهنده','مدل','ورودی','خروجی','هزینه','وضعیت','زمان'].map(function(h){ return el('th', {text:h}); }))),
+      el('thead', {}, el('tr', {}, ['نقش','ارائه‌دهنده','مدل','ورودی','خروجی','جستجوی وب','هزینه','وضعیت','زمان'].map(function(h){ return el('th', {text:h}); }))),
       el('tbody', {}, calls.map(function(c){
         return el('tr', {},
           el('td', {text: c.role}), el('td', {text: c.provider}), el('td', {text: c.model}),
           el('td', {text: fmtNum(c.input_tokens)}), el('td', {text: fmtNum(c.output_tokens)}),
+          el('td', {text: fmtNum(c.web_searches)}),
           el('td', {text: fmtMoney(c.cost_usd)}),
           el('td', {}, c.ok ? el('span', {class:'chip', text:'موفق'}) : el('span', {class:'chip risk-high', text:'ناموفق'})),
           el('td', {text: fmtTime(c.created_at)}));

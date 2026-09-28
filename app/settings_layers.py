@@ -21,6 +21,7 @@ DEFAULTS: dict[str, Any] = {
         "project_usd": 5.0,
         "task_usd": 1.0,
         "max_output_tokens": 2000,
+        "max_web_searches": 5,  # per call; Gateway.call() also enforces a hard ceiling (see WEB_SEARCH_HARD_CEILING)
     },
     "context": {"max_chars": 6000},
     # Owner-wide convenience switch (§ model access modes): "api_key" or "claude_account". Applied to
