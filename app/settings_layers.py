@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Project, SettingsLayer, SettingsScope, Task
+from app.models import Mode, Project, SettingsLayer, SettingsScope, Task
 
 DEFAULTS: dict[str, Any] = {
     "mode": "manual_learning",  # automatic | manual_learning
@@ -58,6 +58,11 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return out
 
 
+def _mode_value(mode: Mode | str) -> str:
+    # Loaded rows hold a Mode member; an object built in Python but not yet flushed may hold the raw string.
+    return mode.value if isinstance(mode, Mode) else str(mode)
+
+
 def get_layer(session: Session, scope: SettingsScope, scope_id: int) -> SettingsLayer | None:
     return session.scalar(select(SettingsLayer).where(SettingsLayer.scope == scope, SettingsLayer.scope_id == scope_id))
 
@@ -69,10 +74,17 @@ def resolve(
     project_id: int | None = None,
     task_id: int | None = None,
 ) -> dict[str, Any]:
-    """Effective settings for the most specific scope given; missing ids are filled from the task/project."""
-    if task_id is not None and project_id is None:
-        task = session.get(Task, task_id)
-        project_id = task.project_id if task else None
+    """Effective settings for the most specific scope given; missing ids are filled from the task/project.
+
+    Precedence, lowest to highest: DEFAULTS ← global layer ← workspace layer ← the project's own
+    fields (`Project.budget`, `Project.mode`) ← project layer ← the task's own `Task.mode` (when set)
+    ← task layer. An entity's own fields are the base of its scope; an explicit settings layer at that
+    same scope still overrides them. Every project has a mode (chosen at creation), so a global or
+    workspace "mode" only applies where no project is in scope.
+    """
+    task = session.get(Task, task_id) if task_id is not None else None
+    if task is not None and project_id is None:
+        project_id = task.project_id
     project = session.get(Project, project_id) if project_id is not None else None
     if project is not None and workspace_id is None:
         workspace_id = project.workspace_id
@@ -89,8 +101,13 @@ def resolve(
     for scope, scope_id in chain:
         if scope_id is None:
             continue
-        if scope is SettingsScope.PROJECT and project is not None and project.budget is not None:
-            result = deep_merge(result, {"budget": {"project_usd": project.budget}})
+        if scope is SettingsScope.PROJECT and project is not None:
+            if project.budget is not None:
+                result = deep_merge(result, {"budget": {"project_usd": project.budget}})
+            if project.mode is not None:
+                result["mode"] = _mode_value(project.mode)
+        if scope is SettingsScope.TASK and task is not None and task.mode is not None:
+            result["mode"] = _mode_value(task.mode)
         layer = get_layer(session, scope, scope_id)
         if layer is not None:
             models_override = layer.values.get("models")

@@ -185,8 +185,8 @@ def _ready_task(client, pid, **kw):
     return t
 
 
-def test_manual_checkpoint_waits_for_decision(client, session_factory, project):
-    pid = project["id"]
+def test_manual_checkpoint_waits_for_decision(client, session_factory, manual_project):
+    pid = manual_project["id"]
     t = _ready_task(client, pid, risk="low")
     use_fake(client, session_factory, [CHECKPOINT])
 

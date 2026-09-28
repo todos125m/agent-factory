@@ -33,8 +33,8 @@ def test_inbox_drops_plan_once_approved(client, session_factory, project):
     app.dependency_overrides.pop(get_gateway, None)
 
 
-def test_inbox_lists_checkpoint_awaiting_decision(client, session_factory, project):
-    pid = project["id"]
+def test_inbox_lists_checkpoint_awaiting_decision(client, session_factory, manual_project):
+    pid = manual_project["id"]
     t = _ready_task(client, pid, risk="low")
     use_fake(client, session_factory, [CHECKPOINT])
     client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint")
@@ -47,8 +47,8 @@ def test_inbox_lists_checkpoint_awaiting_decision(client, session_factory, proje
     app.dependency_overrides.pop(get_gateway, None)
 
 
-def test_inbox_drops_checkpoint_once_decided(client, session_factory, project):
-    pid = project["id"]
+def test_inbox_drops_checkpoint_once_decided(client, session_factory, manual_project):
+    pid = manual_project["id"]
     t = _ready_task(client, pid, risk="low")
     use_fake(client, session_factory, [CHECKPOINT])
     client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint")

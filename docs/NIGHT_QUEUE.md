@@ -158,13 +158,34 @@ Same rules as above. Additionally: HARD SPEND CAP — if this work's session cos
 push what is verified, and report. Real model calls are allowed only for the final verification of
 each item (the laptop uses the owner's own Claude account, `model_access: claude_account`).
 
-- [ ] 6. **Project mode is ignored (bug, root cause known).** `Project.mode` (set at creation, e.g.
+- [x] 6. **Project mode is ignored (bug, root cause known).** `Project.mode` (set at creation, e.g.
       "automatic") is never read: `settings_layers.resolve()` returns `DEFAULTS["mode"] =
       "manual_learning"` (app/settings_layers.py:16) unless a settings layer overrides it, so
       `manager.py:254` never auto-decides and the manager's prompt says "manual_learning" for an
       automatic project (seen in two real runs). Fix: make the project's own `mode` (and a task's
       `mode` when set) feed the resolved settings, with a clear precedence; regression tests for
       automatic → auto-decide and manual_learning → wait for the owner.
+      Done 2026-09-28: `settings_layers.resolve()` folds each entity's own fields in at its scope —
+      DEFAULTS ← global ← workspace ← `Project.mode`/`Project.budget` ← project layer ← `Task.mode` (if
+      set) ← task layer. Decision: a settings layer at the same scope still beats the entity field. Reason:
+      the same rule `Project.budget` already followed, and it keeps the Settings page's per-project/task
+      mode override working. Trade-off: every project has a mode, so a global/workspace "mode" no longer
+      affects any project, and the project chip (`Project.mode`) can differ from the effective mode if a
+      project/task layer overrides it. Result: checkpoint auto-decide, the plan prompt's "Mode:" line and
+      Learning-Trace capture all read one resolved mode. Root cause confirmed on a real server DB: the same
+      automatic project resolved to `manual_learning` (prompt "Mode: manual_learning") before the fix and
+      `automatic` after. Three existing tests had encoded the bug (default = automatic project, expected
+      manual behaviour); they now use a `manual_project` fixture. `tests/test_project_mode.py` adds 12
+      cases (automatic → auto-decide with no settings layer; manual_learning → waits + inbox; automatic +
+      high risk still waits; task mode overriding both ways; plan prompt mode; learning trace; resolve()
+      precedence incl. the project_id+task_id form Gateway.call uses); 7 of them fail with the fix
+      reverted. `pytest -q` 195/195 green. `/code-review` (high): no bug in this diff; out-of-scope issues
+      raised separately — manager decide/auto-decide paths ignore `project.paused` (pre-existing, more
+      reachable now), settings-layer values are unvalidated (a typo'd `mode` overrides the project's).
+      Real-model check with the owner's Claude account: BLOCKED — the local Claude Code CLI 2.1.185
+      rejects the `claude_account` provider's `--permission-prompts none` ("unknown option"), so the plan
+      call failed before reaching a model (ModelCall ok=false, 0 tokens, $0). Needs the owner's decision
+      (CLI version vs. provider flag); not changed here.
 - [ ] 7. **Source quality, not just source presence.** The FACT guard (manager.py ~L68) only checks
       that a URL exists; a real run labeled a restaurant blog's survey as FACT. Add a deterministic
       source tier per URL (e.g. official/academic/stats bodies > app stores/company pages > blogs/

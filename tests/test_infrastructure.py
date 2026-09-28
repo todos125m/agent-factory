@@ -18,19 +18,20 @@ def test_settings_layers_override_in_order(client, project):
     task = client.post(f"/projects/{p2['id']}/tasks", json={"title": "t"}).json()
 
     client.put("/settings/global/0", json={"max_steps": 4, "budget": {"task_usd": 0.5}})
-    client.put(f"/settings/workspace/{ws['id']}", json={"mode": "automatic"})
+    client.put(f"/settings/workspace/{ws['id']}", json={"depth": "deep", "mode": "manual_learning"})
     client.put(f"/settings/project/{p2['id']}", json={"budget": {"project_usd": 2.0}})
     client.put(f"/settings/task/{task['id']}", json={"max_steps": 2})
 
     r = client.get("/settings/resolved", params={"task_id": task["id"]}).json()
     assert r["max_steps"] == 2  # task beats global
-    assert r["mode"] == "automatic"  # from workspace, found via the task's project
+    assert r["depth"] == "deep"  # from workspace, found via the task's project
+    assert r["mode"] == "automatic"  # the project's own mode (set at creation) beats the workspace layer
     assert r["budget"] == {
         "project_usd": 2.0, "task_usd": 0.5, "max_output_tokens": 2000, "max_web_searches": 5,
     }  # nested merge
-    # The other project (no workspace) only sees global + defaults.
+    # The other project (no workspace) only sees global + defaults (+ its own mode).
     other = client.get("/settings/resolved", params={"project_id": pid}).json()
-    assert other["mode"] == "manual_learning" and other["max_steps"] == 4
+    assert other["depth"] == "standard" and other["max_steps"] == 4 and other["mode"] == "automatic"
 
 
 def test_settings_reject_unknown_keys_and_scopes(client, project):

@@ -145,7 +145,7 @@ which question comes next and how answers become a blueprint are pure code. The 
 | POST | `/workspaces` | Create workspace |
 | GET | `/workspaces` | List workspaces |
 | GET/PUT | `/settings/{global\|workspace\|project\|task}/{id}` | Read / replace one settings layer (global id = 0) |
-| GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project ← task |
+| GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project's own `mode`/`budget` ← project layer ← task's own `mode` (if set) ← task layer |
 | GET | `/agents`, `/agents/{name}`, `?capability=` | Agent registry; POST `/agents` registers after validation |
 | GET | `/skills`, `/skills/{name}` | Skills (summary / full body) |
 | GET | `/projects/{id}/usage` | Tokens, cost and budget for a project |

@@ -33,8 +33,8 @@ def capture_from_task_output(
     finding as Project Memory; only records a Learning Trace in manual_learning mode (§26).
 
     `mode` is the caller's already-resolved settings "mode" (the same one checkpoints gate on — see
-    app/manager.py::create_checkpoint), not `Project.mode`, which is only the value set at creation
-    and never consulted for behavior elsewhere in this app. Taking it as a parameter avoids a second
+    app/manager.py::create_checkpoint), which folds in `Project.mode`, `Task.mode` and any settings-layer
+    override (precedence in app/settings_layers.py::resolve). Taking it as a parameter avoids a second
     settings_layers.resolve() for the same task within the same run_task call.
     """
     category = AGENT_MEMORY_CATEGORY.get(agent_name, MemoryCategory.TECHNICAL)

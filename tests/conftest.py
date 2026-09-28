@@ -43,3 +43,13 @@ def project(client):
     return client.post(
         "/projects", json={"owner_id": user["id"], "title": "SaaS idea", "goal": "Validate a SaaS for small firms"}
     ).json()
+
+
+@pytest.fixture
+def manual_project(client):
+    """`project` defaults to mode "automatic" (the API default); this one waits for the owner at checkpoints."""
+    user = client.post("/users", json={"email": "m@example.com"}).json()
+    return client.post("/projects", json={
+        "owner_id": user["id"], "title": "Manual idea", "goal": "Validate a SaaS for small firms",
+        "mode": "manual_learning",
+    }).json()
