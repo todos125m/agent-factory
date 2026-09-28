@@ -54,7 +54,46 @@ model calls); `git pull --rebase` before starting and before pushing; branch
       round-trip against a genuine local socket server (not mocked `urlopen`) confirmed the request
       body and response mapping end-to-end, twice (before and after the num_predict fix). No real
       Ollama/model calls in tests.
-- [ ] 4. OpenAI provider adapter (owner decision d7: multi-provider) using the official `openai`
+- [x] 4. OpenAI provider adapter (owner decision d7: multi-provider) using the official `openai`
       SDK in its own file; key from OPENAI_API_KEY; usage mapping; mocked tests.
+      Done 2026-09-28: `app/gateway/openai_provider.py::OpenAIProvider` (Chat Completions API,
+      `max_completion_tokens`, `response_format: json_schema` for structured output, `reasoning_effort`
+      from `effort`); registered in `default_providers()` (local import to avoid a circular import with
+      `providers.py`, which it imports from). API shape verified against openai/openai-python's own
+      README/helpers.md plus current docs (WebFetch, not memory) — `max_tokens` -> `max_completion_tokens`
+      and the `reasoning_effort`/Structured-Outputs details postdate older training data. `openai` added
+      as a `pyproject.toml` optional extra (parallel to `anthropic`), `OPENAI_API_KEY` documented in
+      `.env.example`/README. `/code-review` (high, then two follow-up medium passes) on the diff found
+      and fixed 7 real issues before push: hardcoded `strict: true` on `response_format` would have
+      rejected every real call, since none of this app's own schemas (PlanIn, CheckpointOut, TaskRunOut,
+      ChatReplyOut — all with optional/defaulted fields) satisfy OpenAI's strict-mode requirements
+      (verified directly against `ChatReplyOut.model_json_schema()`'s actual output) — switched to
+      `strict: false`, consistent with how every caller already validates+tolerates the response after
+      the fact; no `PRICES` entries for any OpenAI model meant `cost_usd()` silently returned $0 forever
+      for a real, billed provider, defeating the budget check that Ollama/claude_account correctly skip
+      only because they're genuinely free — added verified (Sept 2026) gpt-5/5.5/5-mini/5-nano prices,
+      with an explicit "re-check before relying on this for real spend" caveat since pricing moves; the
+      `effort` field (used for Anthropic reasoning roles already) was silently dropped instead of being
+      sent as `reasoning_effort`; OpenAI's `prompt_tokens` already includes the cached subset (unlike
+      Anthropic's `input_tokens`), so passing it through unadjusted double-billed cached tokens once
+      `cost_usd()`'s shared formula added the cache-read term on top — fixed by subtracting the cached
+      count; truncated output reported OpenAI's raw `finish_reason: "length"` instead of this codebase's
+      cross-provider `stop_reason: "max_tokens"` marker (mirroring the same fix already made for Ollama);
+      an empty `choices` list raised a raw `IndexError` instead of `ProviderError`; a Structured-Outputs
+      safety refusal (`message.refusal`, `content: null`) fell through to a misleading "invalid JSON"
+      error instead of surfacing the real refusal reason (mirroring `AnthropicProvider`'s explicit
+      refusal check). Noted but deliberately not fixed (out of scope for this item, no functional bug):
+      the truncation-normalize-then-skip-parse logic is now near-identical in three provider files with
+      no shared helper — a `/simplify` candidate, not urgent. Also noted: the shared cache-read pricing
+      ratio (0.1x, Anthropic's actual discount) is an approximation for other providers, documented in
+      `pricing.py`'s own docstring rather than invented as a precise per-provider rate OpenAI's own cache
+      discount has shifted between 50% and 90% by model generation within this same month. Verified:
+      `pytest -q` 148/148 green (24 new provider tests: schema/effort/cache/truncation/refusal/empty-
+      choices/budget-integration cases, incl. one exercising the real un-mocked "package not installed"
+      path — confirmed by actually installing then uninstalling the real `openai` SDK in this venv to
+      check both states, restoring the environment `pip install -e ".[dev]"` produces); the real SDK's
+      `chat.completions.create` signature was checked twice (fresh install) to confirm every kwarg this
+      provider sends (`max_completion_tokens`, `response_format`, `reasoning_effort`) is genuinely
+      accepted. No real OpenAI API calls in tests.
 - [ ] 5. Update README status + a short Persian morning summary at the top of this file
       using the 9-part final report from docs/ENGINEERING_STANDARD.md (what was actually verified, failures found, remaining risks, production readiness).

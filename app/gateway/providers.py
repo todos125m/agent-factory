@@ -228,16 +228,6 @@ class OllamaProvider:
         )
 
 
-class NotConfiguredProvider:
-    """Placeholder for a provider the owner chose but whose adapter/key is not in place yet."""
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def complete(self, request: ModelRequest) -> ModelResponse:
-        raise ProviderError(f"provider '{self.name}' is not configured yet")
-
-
 @dataclass
 class FakeProvider:
     """Deterministic provider for tests and offline development: replays queued replies."""
@@ -256,11 +246,13 @@ class FakeProvider:
 
 
 def default_providers() -> dict[str, Provider]:
+    from app.gateway.openai_provider import OpenAIProvider  # local: avoids a circular import at module load
+
     providers: dict[str, Provider] = {
         "anthropic": AnthropicProvider(),
         "claude_account": ClaudeAccountProvider(),
         "ollama": OllamaProvider(),
-        "openai": NotConfiguredProvider("openai"),
+        "openai": OpenAIProvider(),
     }
     if os.getenv("AGENT_FACTORY_FAKE_MODELS"):
         providers["fake"] = FakeProvider()

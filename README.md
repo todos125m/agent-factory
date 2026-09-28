@@ -157,6 +157,12 @@ that doesn't override it:
   `docker compose --profile ollama up` (not started by default) and set `OLLAMA_BASE_URL=http://ollama:11434`;
   pull a model first with `docker compose exec ollama ollama pull <model>`.
 
+A fourth provider, **`openai`** (owner decision d7 — multi-provider), is available per role — set an
+explicit `models.<role>.provider: "openai"` (it isn't one of the `model_access` switch's values, since
+that switch only covers whole-project convenience defaults). Set `OPENAI_API_KEY` and
+`pip install -e ".[openai]"`; uses the official `openai` SDK's Chat Completions API
+(`max_completion_tokens`, `response_format: {"type": "json_schema", ...}` for structured output).
+
 Task states: `CREATED → READY → RUNNING → (WAITING) → COMPLETED → REVIEWED`, with
 `FAILED → READY` (retry, bounded by `max_retries`) or `→ ESCALATED`, and `COMPLETED → READY`
 for the reviewer's `CHANGES_REQUIRED` loop.

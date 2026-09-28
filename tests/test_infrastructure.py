@@ -125,9 +125,9 @@ def test_list_model_calls_for_a_project(session, client):
     assert client.get("/projects/999/model_calls").status_code == 404
 
 
-def test_failed_call_is_logged_and_unconfigured_provider_errors(session):
+def test_failed_call_is_logged_and_unavailable_provider_errors(session):
     project = make_project(session)
-    gw = Gateway(session)  # real providers; openai adapter not configured
+    gw = Gateway(session)  # real providers; the optional `openai` package isn't installed here
     from app.models import SettingsLayer, SettingsScope
 
     session.add(SettingsLayer(scope=SettingsScope.PROJECT, scope_id=project.id, values={
@@ -137,7 +137,7 @@ def test_failed_call_is_logged_and_unconfigured_provider_errors(session):
     with pytest.raises(ProviderError):
         gw.call("cheap", system="s", user="u", project_id=project.id)
     call = session.query(ModelCall).one()
-    assert call.ok is False and "not configured" in call.error
+    assert call.ok is False and "not installed" in call.error
 
 
 # ---------- context builder ----------
