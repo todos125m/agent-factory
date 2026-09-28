@@ -149,3 +149,27 @@ model calls); `git pull --rebase` before starting and before pushing; branch
       Persian morning summary above covers items 1-4 (changes, architecture, verification, failures
       found and fixed, remaining risks, production readiness). This is a docs-only change; `pytest -q`
       re-run to confirm still 148/148 green before push (evidence, not assumption).
+
+---
+
+## Queue 2 — from the real test run of 2026-09-28 (run on the owner's laptop session)
+
+Same rules as above. Additionally: HARD SPEND CAP — if this work's session cost passes $10, stop,
+push what is verified, and report. Real model calls are allowed only for the final verification of
+each item (the laptop uses the owner's own Claude account, `model_access: claude_account`).
+
+- [ ] 6. **Project mode is ignored (bug, root cause known).** `Project.mode` (set at creation, e.g.
+      "automatic") is never read: `settings_layers.resolve()` returns `DEFAULTS["mode"] =
+      "manual_learning"` (app/settings_layers.py:16) unless a settings layer overrides it, so
+      `manager.py:254` never auto-decides and the manager's prompt says "manual_learning" for an
+      automatic project (seen in two real runs). Fix: make the project's own `mode` (and a task's
+      `mode` when set) feed the resolved settings, with a clear precedence; regression tests for
+      automatic → auto-decide and manual_learning → wait for the owner.
+- [ ] 7. **Source quality, not just source presence.** The FACT guard (manager.py ~L68) only checks
+      that a URL exists; a real run labeled a restaurant blog's survey as FACT. Add a deterministic
+      source tier per URL (e.g. official/academic/stats bodies > app stores/company pages > blogs/
+      unknown) and downgrade a FACT whose only sources are the lowest tier to INFERENCE with a
+      visible note. Keep it deterministic (domain rules in a registry file), no extra model calls.
+- [ ] 8. **Inbox gap.** READY tasks with no checkpoint yet don't appear in the decision inbox, so
+      the owner can't see what is waiting to start. Show them (kind "ready") with a one-tap
+      "start" action in web/app.js; tests for the inbox API.
