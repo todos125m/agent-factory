@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import Base, SessionLocal, engine
 from app.registry import sync_from_files
-from app.routers import agents, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
+from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -31,6 +31,7 @@ app.include_router(feedback.router)
 app.include_router(inbox.router)
 app.include_router(blueprints.router)
 app.include_router(interview.router)
+app.include_router(benchmarks.router)
 
 
 @app.get("/health")

@@ -201,6 +201,22 @@ class UsageOut(BaseModel):
     budget_usd: float
 
 
+class BenchmarkRunOut(ORM):
+    id: int
+    goal: str
+    provider: str
+    model: str
+    effort: str | None
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    duration_ms: int
+    schema_valid: bool
+    error: str | None
+    rating: int | None
+    created_at: datetime
+
+
 class ModelCallOut(ORM):
     id: int
     project_id: int | None

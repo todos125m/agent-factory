@@ -107,7 +107,7 @@ function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(
 
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','inbox','projects','agents','settings','observability'];
+var PAGES = ['dashboard','inbox','projects','agents','benchmark','settings','observability'];
 var root;
 
 function setNav(page){
@@ -140,6 +140,7 @@ function route(){
   else if (page === 'agents' && parts[1] === 'new') renderAgentIntake(root);
   else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
   else if (page === 'agents') renderAgentsList(root);
+  else if (page === 'benchmark') renderBenchmark(root);
   else if (page === 'settings') renderSettings(root);
   else if (page === 'observability') renderObservability(root);
 }
@@ -1250,6 +1251,103 @@ function renderObservability(root){
     callCard.appendChild(wrap);
     body.appendChild(callCard);
   }
+}
+
+/* ============================== benchmark ============================== */
+
+var BENCH_EFFORTS = ['', 'low', 'medium', 'high'];
+var BENCH_EFFORT_FA = {'':'—', low:'کم', medium:'متوسط', high:'زیاد'};
+
+function renderBenchmark(root){
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:'سنجش'})));
+  var formCard = el('div', {class:'card stack'});
+  var rows = el('div', {class:'stack', style:'gap:10px'});
+  var status = el('p', {class:'err muted'});
+  var addBtn = el('button', {class:'btn ghost sm', type:'button', text:'+ افزودن مسیر'});
+  var runBtn = el('button', {class:'btn', text:'اجرا و مقایسه'});
+  var body = el('div', {class:'stack'});
+
+  function routeRow(defaults){
+    defaults = defaults || {};
+    var provider = el('select', {});
+    PROVIDERS.forEach(function(p){ provider.appendChild(el('option', {value:p, text:p})); });
+    provider.value = defaults.provider || 'anthropic';
+    var model = el('input', {type:'text', placeholder:'claude-opus-5', value: defaults.model || ''});
+    var effort = el('select', {});
+    BENCH_EFFORTS.forEach(function(e){ effort.appendChild(el('option', {value:e, text:BENCH_EFFORT_FA[e]})); });
+    effort.value = defaults.effort || '';
+    var removeBtn = el('button', {class:'btn ghost sm', type:'button', text:'حذف'});
+    var row = el('div', {class:'grid grid-3', style:'align-items:end;gap:8px'},
+      el('label', {class:'f'}, 'ارائه‌دهنده', provider),
+      el('label', {class:'f'}, 'مدل', model),
+      el('div', {class:'row', style:'gap:8px;align-items:end'},
+        el('label', {class:'f', style:'flex:1'}, 'تلاش', effort), removeBtn));
+    row._route = function(){ return {provider: provider.value, model: model.value.trim(), effort: effort.value || null}; };
+    removeBtn.addEventListener('click', function(){ if (rows.children.length > 1) rows.removeChild(row); });
+    return row;
+  }
+
+  rows.appendChild(routeRow({provider:'anthropic', model:'claude-opus-5', effort:'low'}));
+  rows.appendChild(routeRow({provider:'anthropic', model:'claude-sonnet-5', effort:'low'}));
+  addBtn.addEventListener('click', function(){ if (rows.children.length < 5) rows.appendChild(routeRow({})); });
+
+  runBtn.addEventListener('click', function(){
+    var routes = Array.prototype.map.call(rows.children, function(r){ return r._route(); });
+    if (routes.some(function(r){ return !r.model; })){ status.textContent = 'مدل هر مسیر را وارد کن.'; return; }
+    runBtn.disabled = true; status.textContent = '';
+    api('/benchmarks/run', {method:'POST', json:{routes: routes}})
+      .then(function(){ runBtn.disabled = false; load(); })
+      .catch(function(e){ status.textContent = e.message; runBtn.disabled = false; });
+  });
+
+  formCard.appendChild(el('p', {class:'muted',
+    text:'همه‌ی مسیرها روی یک هدف ثابت اجرا می‌شوند تا مقایسه‌ی توکن/هزینه/زمان منصفانه بماند.'}));
+  formCard.appendChild(rows);
+  formCard.appendChild(el('div', {class:'btn-row'}, addBtn, runBtn));
+  formCard.appendChild(status);
+  root.appendChild(formCard);
+  root.appendChild(body);
+
+  function ratingCell(r){
+    var sel = el('select', {});
+    ['', '1', '2', '3', '4', '5'].forEach(function(v){ sel.appendChild(el('option', {value:v, text: v || '—'})); });
+    sel.value = r.rating ? String(r.rating) : '';
+    sel.addEventListener('change', function(){
+      if (!sel.value) return;
+      api('/benchmarks/' + r.id + '/rate', {method:'POST', json:{rating: Number(sel.value)}})
+        .catch(function(e){ alert(e.message); });
+    });
+    return sel;
+  }
+
+  function benchmarkRow(r){
+    return el('tr', {},
+      el('td', {text:r.provider}), el('td', {text:r.model}), el('td', {text: BENCH_EFFORT_FA[r.effort || ''] || r.effort}),
+      el('td', {text: fmtNum(r.input_tokens)}), el('td', {text: fmtNum(r.output_tokens)}),
+      el('td', {text: fmtMoney(r.cost_usd)}), el('td', {text: fmtNum(r.duration_ms) + ' ms'}),
+      el('td', {}, r.schema_valid
+        ? el('span', {class:'chip status-COMPLETED', text:'معتبر'})
+        : el('span', {class:'chip status-FAILED', title: r.error || '', text:'نامعتبر'})),
+      el('td', {}, ratingCell(r)));
+  }
+
+  function load(){
+    clear(body); body.appendChild(loadingBox());
+    api('/benchmarks').then(function(runs){
+      clear(body);
+      if (!runs.length){
+        body.appendChild(emptyBox('📈', 'هنوز اجرایی نیست', 'یک یا چند مسیر را بالا اجرا کن تا مقایسه شکل بگیرد.'));
+        return;
+      }
+      var wrap = el('div', {class:'table-wrap'});
+      wrap.appendChild(el('table', {},
+        el('thead', {}, el('tr', {}, ['ارائه‌دهنده','مدل','تلاش','ورودی','خروجی','هزینه','زمان','schema','امتیاز']
+          .map(function(h){ return el('th', {text:h}); }))),
+        el('tbody', {}, runs.map(benchmarkRow))));
+      body.appendChild(wrap);
+    }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message, load)); });
+  }
+  load();
 }
 
 /* ============================== boot ============================== */

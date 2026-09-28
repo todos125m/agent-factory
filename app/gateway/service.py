@@ -41,9 +41,10 @@ class Gateway:
         task_id: int | None = None,
         agent: str | None = None,
         json_schema: dict[str, Any] | None = None,
+        route: dict[str, Any] | None = None,
     ) -> ModelResponse:
         settings = settings_layers.resolve(self.session, project_id=project_id, task_id=task_id)
-        route = settings["models"].get(role)
+        route = route or settings["models"].get(role)
         if route is None:
             raise ProviderError(f"no model configured for role '{role}'")
         provider = self.providers.get(route["provider"])
@@ -88,6 +89,10 @@ class Gateway:
         call.duration_ms = int((time.monotonic() - started) * 1000)
         self.session.add(call)
         self.session.commit()
+        # Backfill what the caller can't otherwise get without re-querying ModelCall (racy under
+        # concurrent calls, e.g. the benchmark tab comparing routes).
+        response.cost_usd = call.cost_usd
+        response.duration_ms = call.duration_ms
         return response
 
     def _check_budget(self, project_id: int | None, task_id: int | None, budget: dict[str, Any], estimate: float) -> None:

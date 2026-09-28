@@ -35,6 +35,7 @@ class ModelResponse:
     data: Any = None  # parsed JSON when a schema was requested
     stop_reason: str | None = None
     cost_usd: float | None = None  # overrides the gateway's pricing-table estimate when set (e.g. subscription calls)
+    duration_ms: int | None = None  # filled in by Gateway.call() after the request completes
 
 
 class ProviderError(RuntimeError):

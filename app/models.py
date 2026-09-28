@@ -217,6 +217,27 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BenchmarkRun(Base):
+    """One route config (provider/model/effort) tried against the fixed benchmark goal (owner
+    decision d12): tokens/cost/duration/schema-validity plus an optional owner 1-5 rating."""
+
+    __tablename__ = "benchmark_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(50))
+    model: Mapped[str] = mapped_column(String(100))
+    effort: Mapped[str | None] = mapped_column(String(20))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    schema_valid: Mapped[bool] = mapped_column(default=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    rating: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ModelCall(Base):
     """Every model call, for token/cost tracking and budgets (§31, §34)."""
 
