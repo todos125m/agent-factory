@@ -2,11 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import memory as memory_module
 from app import settings_layers
 from app.db import get_session
 from app.events import record_event
-from app.models import ModelCall, Project, RunEvent, User, Workspace
-from app.schemas import ModelCallOut, ProjectCreate, ProjectOut, ProjectPauseUpdate, ProjectStageUpdate, RunEventOut, UsageOut
+from app.models import LearningTrace, MemoryCategory, MemoryItem, ModelCall, Project, RunEvent, Task, User, Workspace
+from app.schemas import (
+    LearningTraceOut, MemoryItemCreate, MemoryItemOut, ModelCallOut, ProjectCreate, ProjectOut,
+    ProjectPauseUpdate, ProjectStageUpdate, RunEventOut, UsageOut,
+)
 from app.state_machine import TransitionError, check_project_advance
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -101,4 +105,33 @@ def list_model_calls(project_id: int, session: Session = Depends(get_session)):
     load_project(session, project_id)
     return session.scalars(
         select(ModelCall).where(ModelCall.project_id == project_id).order_by(ModelCall.id.desc())
+    ).all()
+
+
+@router.get("/{project_id}/memory", response_model=list[MemoryItemOut])
+def list_memory(project_id: int, category: MemoryCategory | None = None, session: Session = Depends(get_session)):
+    load_project(session, project_id)
+    query = select(MemoryItem).where(MemoryItem.project_id == project_id).order_by(MemoryItem.id.desc())
+    if category is not None:
+        query = query.where(MemoryItem.category == category)
+    return session.scalars(query).all()
+
+
+@router.post("/{project_id}/memory", response_model=MemoryItemOut, status_code=201)
+def create_memory(project_id: int, body: MemoryItemCreate, session: Session = Depends(get_session)):
+    project = load_project(session, project_id)
+    if body.task_id is not None:
+        task = session.get(Task, body.task_id)
+        if not task or task.project_id != project_id:
+            raise HTTPException(404, "Task not found in this project")
+    return memory_module.add_memory_item(
+        session, project, body.category, body.title, body.content, task_id=body.task_id
+    )
+
+
+@router.get("/{project_id}/learning", response_model=list[LearningTraceOut])
+def list_learning(project_id: int, session: Session = Depends(get_session)):
+    load_project(session, project_id)
+    return session.scalars(
+        select(LearningTrace).where(LearningTrace.project_id == project_id).order_by(LearningTrace.id.desc())
     ).all()

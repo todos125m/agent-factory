@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import Mode, ProjectStage, RiskLevel, SettingsScope, TaskStatus
+from app.models import MemoryCategory, Mode, ProjectStage, RiskLevel, SettingsScope, TaskStatus
 
 
 class ORM(BaseModel):
@@ -199,6 +199,36 @@ class UsageOut(BaseModel):
     cache_read_tokens: int
     cost_usd: float
     budget_usd: float
+
+
+class MemoryItemCreate(BaseModel):
+    category: MemoryCategory
+    title: str = Field(max_length=300)  # matches MemoryItem.title's String(300) column
+    content: str
+    task_id: int | None = None
+
+
+class MemoryItemOut(ORM):
+    id: int
+    project_id: int
+    task_id: int | None
+    category: MemoryCategory
+    title: str
+    content: str
+    created_at: datetime
+
+
+class LearningTraceOut(ORM):
+    id: int
+    project_id: int
+    task_id: int | None
+    concept: str
+    explanation: str
+    example: str | None
+    related_decision: str | None
+    user_question: str | None
+    mastery_signal: str | None
+    created_at: datetime
 
 
 class BenchmarkRunOut(ORM):

@@ -16,6 +16,8 @@ var MODEL_ROLES = ['manager','research','coding','cheap'];
 var ROLE_FA = {manager:'مدیر', research:'پژوهش', coding:'کدنویسی', cheap:'ارزان'};
 var PROVIDERS = ['anthropic','claude_account','ollama','openai'];
 var MODEL_ACCESS_FA = {api_key:'کلید API', claude_account:'حساب Claude خودم', ollama:'Ollama (محلی)'};
+var MEMORY_CATEGORY_FA = {brief:'بریف', decisions:'تصمیم‌ها', research:'پژوهش', customer:'مشتری',
+  strategy:'استراتژی', product:'محصول', technical:'فنی', experiments:'آزمایش‌ها', learning:'یادگیری'};
 
 /* ============================== api client ============================== */
 
@@ -430,13 +432,14 @@ function renderProjectDetail(root, projectId){
     clear(body);
     var tabs = el('div', {class:'tabs', role:'tablist'},
       tabBtn('overview', 'بررسی'), tabBtn('tasks', 'وظایف'), tabBtn('chat', 'گفتگو با مدیر'),
-      tabBtn('events', 'رویدادها'), tabBtn('usage', 'مصرف'));
+      tabBtn('memory', 'حافظه'), tabBtn('events', 'رویدادها'), tabBtn('usage', 'مصرف'));
     body.appendChild(tabs);
     var panel = el('div', {class:'stack'});
     body.appendChild(panel);
     if (tab === 'overview') drawOverview(panel);
     else if (tab === 'tasks') drawTasks(panel);
     else if (tab === 'chat') drawChat(panel);
+    else if (tab === 'memory') drawMemory(panel);
     else if (tab === 'events') drawEvents(panel);
     else if (tab === 'usage') drawUsage(panel);
   }
@@ -756,6 +759,75 @@ function renderProjectDetail(root, projectId){
       el('div', {class:'card stat'}, el('b', {text: fmtNum(usage.input_tokens)}), el('span', {text:'توکن ورودی'})),
       el('div', {class:'card stat'}, el('b', {text: fmtNum(usage.output_tokens)}), el('span', {text:'توکن خروجی'}))
     ));
+  }
+
+  function drawMemory(panel){
+    var formCard = el('div', {class:'card stack'});
+    var listBox = el('div', {class:'stack'});
+    var catSel = el('select', {});
+    Object.keys(MEMORY_CATEGORY_FA).forEach(function(c){ catSel.appendChild(el('option', {value:c, text:MEMORY_CATEGORY_FA[c]})); });
+    var titleInput = el('input', {type:'text', placeholder:'عنوان'});
+    var contentInput = el('textarea', {placeholder:'محتوا'});
+    var addStatus = el('p', {class:'err muted'});
+    var addBtn = el('button', {class:'btn sm', text:'افزودن'});
+
+    function load(){
+      clear(listBox); listBox.appendChild(loadingBox());
+      Promise.all([api('/projects/' + projectId + '/memory'), api('/projects/' + projectId + '/learning')])
+        .then(function(r){
+          clear(listBox);
+          var items = r[0], traces = r[1];
+          if (!items.length && !traces.length){
+            listBox.appendChild(emptyBox('🧠', 'حافظه‌ای ثبت نشده',
+              'وقتی وظیفه‌ای اجرا شود، یافته‌ها و درس‌ها اینجا نشان داده می‌شوند.'));
+            return;
+          }
+          // Merge both kinds into one chronological feed — each card shows a timestamp, so the
+          // list should read newest-first regardless of which endpoint it came from.
+          var entries = items.map(function(m){ return {kind:'memory', at:m.created_at, data:m}; })
+            .concat(traces.map(function(t){ return {kind:'learning', at:t.created_at, data:t}; }));
+          entries.sort(function(a, b){ return a.at < b.at ? 1 : a.at > b.at ? -1 : 0; });
+          entries.forEach(function(entry){
+            if (entry.kind === 'learning'){
+              var t = entry.data;
+              listBox.appendChild(el('div', {class:'card stack'},
+                el('div', {class:'row', style:'justify-content:space-between'},
+                  el('span', {class:'chip', text:'درس'}), el('small', {class:'muted', text: fmtTime(t.created_at)})),
+                el('b', {text:t.concept}), el('p', {class:'muted', text:t.explanation})));
+            } else {
+              var m = entry.data;
+              listBox.appendChild(el('div', {class:'card stack'},
+                el('div', {class:'row', style:'justify-content:space-between'},
+                  el('span', {class:'chip', text: MEMORY_CATEGORY_FA[m.category] || m.category}),
+                  el('small', {class:'muted', text: fmtTime(m.created_at)})),
+                el('b', {text:m.title}), el('p', {class:'muted', text:m.content})));
+            }
+          });
+        }).catch(function(e){ clear(listBox); listBox.appendChild(errorBox(e.message, load)); });
+    }
+
+    addBtn.addEventListener('click', function(){
+      if (!titleInput.value.trim() || !contentInput.value.trim()){
+        addStatus.textContent = 'عنوان و محتوا را پر کن.'; return;
+      }
+      addBtn.disabled = true; addStatus.textContent = '';
+      api('/projects/' + projectId + '/memory', {method:'POST', json:{
+        category: catSel.value, title: titleInput.value.trim(), content: contentInput.value.trim(),
+      }}).then(function(){
+        titleInput.value = ''; contentInput.value = ''; addBtn.disabled = false;
+        load();
+      }).catch(function(e){ addStatus.textContent = e.message; addBtn.disabled = false; });
+    });
+
+    formCard.appendChild(el('h3', {text:'افزودن یادداشت به حافظه'}));
+    formCard.appendChild(el('div', {class:'grid grid-2'},
+      el('label', {class:'f'}, 'دسته', catSel), el('label', {class:'f'}, 'عنوان', titleInput)));
+    formCard.appendChild(el('label', {class:'f'}, 'محتوا', contentInput));
+    formCard.appendChild(el('div', {class:'btn-row'}, addBtn));
+    formCard.appendChild(addStatus);
+    panel.appendChild(formCard);
+    panel.appendChild(listBox);
+    load();
   }
 
   reload().catch(function(e){ clear(body); body.appendChild(errorBox(e.message, function(){ route(); })); });

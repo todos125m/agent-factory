@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import context, settings_layers
+from app import context, memory, settings_layers
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
@@ -270,8 +270,9 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     if agent is None:
         raise ManagerError(f"agent '{task.owner}' is not registered")
 
+    task_settings = settings_layers.resolve(session, task_id=task.id)
     system = context.system_prompt(session, agent, agent.skills)
-    user = context.task_context(session, task)
+    user = context.task_context(session, task, settings=task_settings)
     response = gateway.call(
         agent.model_role, system=system, user=user, project_id=project.id, task_id=task.id, agent=agent.name,
         json_schema=TaskRunOut.model_json_schema(),
@@ -286,6 +287,7 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     record_event(session, project.id, "task.status_changed", task.id,
                  **{"from": previous.value, "to": "COMPLETED", "reason": "task executed"})
     record_event(session, project.id, "task.completed", task.id, **result.model_dump())
+    memory.capture_from_task_output(session, project, task, agent.name, result, mode=task_settings["mode"])
     session.flush()  # dependents' status query below must see this task's new COMPLETED status
 
     ready_ids = _promote_ready_dependents(session, project, task)

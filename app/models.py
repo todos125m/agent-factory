@@ -217,6 +217,51 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class MemoryCategory(str, enum.Enum):
+    BRIEF = "brief"
+    DECISIONS = "decisions"
+    RESEARCH = "research"
+    CUSTOMER = "customer"
+    STRATEGY = "strategy"
+    PRODUCT = "product"
+    TECHNICAL = "technical"
+    EXPERIMENTS = "experiments"
+    LEARNING = "learning"
+
+
+class MemoryItem(Base):
+    """Long-term Project Memory (docs/ARCHITECTURE.md §24): selective, category-tagged notes an
+    agent's context can retrieve from — never the whole project history (app/context.py)."""
+
+    __tablename__ = "memory_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    category: Mapped[MemoryCategory] = mapped_column(Enum(MemoryCategory))
+    title: Mapped[str] = mapped_column(String(300))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LearningTrace(Base):
+    """§26 Learning Memory: a lesson captured in manual_learning mode, kept separate from the task's
+    own output — Manual Mode must not only store the result, but also what it taught the owner."""
+
+    __tablename__ = "learning_traces"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    concept: Mapped[str] = mapped_column(String(200))
+    explanation: Mapped[str] = mapped_column(Text)
+    example: Mapped[str | None] = mapped_column(Text)
+    related_decision: Mapped[str | None] = mapped_column(Text)
+    user_question: Mapped[str | None] = mapped_column(Text)
+    mastery_signal: Mapped[str | None] = mapped_column(String(50))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class BenchmarkRun(Base):
     """One route config (provider/model/effort) tried against the fixed benchmark goal (owner
     decision d12): tokens/cost/duration/schema-validity plus an optional owner 1-5 rating."""

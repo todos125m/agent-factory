@@ -25,7 +25,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 4 — First Agents | Research, Customer, Strategy, Product; task execution (`/tasks/{id}/run`) | ✅ (base — no tools yet) |
 | 5 — Model Gateway | Provider abstraction, routing, cost tracking | ✅ (Anthropic, claude_account, Ollama, OpenAI) |
 | 6 — Builder + Reviewer | GitHub, coding worker, PR, review loop | |
-| 7 — Memory | Project state, decisions, retrieval, learning memory | |
+| 7 — Memory | Project state, decisions, retrieval, learning memory | ✅ (base — recency retrieval, no embeddings/pgvector yet) |
 | 8 — Learning UX | Learning Trace, Ask Why, Try It Myself | |
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
@@ -101,6 +101,24 @@ specialist shares the `task-execution` skill (the `/run` output shape) and `evid
 HYPOTHESIS, never invented sources), plus one domain skill (`research-method`, `customer-voice`,
 `strategy-framing`, `product-definition`). The web panel shows an «اجرا» button on `RUNNING` tasks and
 renders the result with evidence chips per finding.
+
+## Phase 7 API — Memory
+
+Every completed task (`/tasks/{id}/run`) writes a `MemoryItem` (Project Memory, §24 — one of `brief|
+decisions|research|customer|strategy|product|technical|experiments|learning`, category taken from the
+owner agent when one maps to it, `technical` otherwise) and, only in `manual_learning` mode, a
+`LearningTrace` (§26 — the task's `lesson`, kept separate from its output). `app/context.py::task_context`
+retrieves the project's 5 most recent memory items into every task's context — recency, not semantic
+search (§53: no vector DB yet).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/projects/{id}/memory?category=` | List Project Memory items, newest first |
+| POST | `/projects/{id}/memory` | Add one manually (e.g. an initial brief) — `{category, title, content, task_id?}` |
+| GET | `/projects/{id}/learning` | List Learning Traces (read-only — captured automatically, not authored) |
+
+The web panel's project detail page has a «حافظه» tab: add a memory note, and see memory + learning
+entries merged into one chronological feed.
 
 ## Agent Blueprint API
 

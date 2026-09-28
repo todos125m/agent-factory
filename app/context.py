@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import settings_layers
-from app.models import Agent, RunEvent, Skill, Task
+from app.models import Agent, MemoryItem, RunEvent, Skill, Task
 
 
 class ContextError(ValueError):
@@ -37,17 +37,25 @@ def agent_directory(session: Session) -> str:
     return "\n".join(f"- {a.name}: {', '.join(a.capabilities)}" for a in agents)
 
 
+def _truncate(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def _summary(output: dict[str, Any] | None, limit: int) -> str:
     if not output:
         return "(no output)"
     text = output.get("summary") if isinstance(output.get("summary"), str) else json.dumps(
         output, ensure_ascii=False, sort_keys=True
     )
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return _truncate(text, limit)
 
 
-def task_context(session: Session, task: Task, *, extra: str = "") -> str:
-    settings = settings_layers.resolve(session, task_id=task.id)
+def task_context(
+    session: Session, task: Task, *, extra: str = "", settings: dict[str, Any] | None = None
+) -> str:
+    """`settings` lets a caller that already resolved layered settings for this task (e.g.
+    app/manager.py::run_task, which also needs "mode") reuse it instead of resolving twice."""
+    settings = settings if settings is not None else settings_layers.resolve(session, task_id=task.id)
     max_chars = int(settings["context"]["max_chars"])
 
     # Highest priority first; later sections are dropped when the budget runs out.
@@ -57,6 +65,26 @@ def task_context(session: Session, task: Task, *, extra: str = "") -> str:
     ]
     if extra:
         sections.append(extra)
+    # §24: retrieve only what's relevant, never the whole project memory — here, recency (§53: no
+    # vector/semantic search yet). Not excluding this task's own prior memory: it can only exist
+    # from an earlier run (memory is captured only after a run completes, always after this call
+    # runs for that same execution), so on a redo (the reviewer's COMPLETED -> READY loop) the agent
+    # should see what it found last time, not lose it.
+    memories = session.scalars(
+        select(MemoryItem)
+        .where(MemoryItem.project_id == task.project_id)
+        .order_by(MemoryItem.id.desc())
+        .limit(5)
+    ).all()
+    if memories:
+        # Capped the same way dependency results are below: a fixed 300 chars/item would let this
+        # section alone exhaust a tight max_chars budget and starve the (higher-value) dependency
+        # results appended after it, since the truncate-and-break loop drops everything past the
+        # first section it has to cut.
+        per_memory = max(100, (max_chars // 4) // len(memories))
+        sections.append("Relevant project memory:\n" + "\n".join(
+            f"- [{m.category.value}] {m.title}: {_truncate(m.content, per_memory)}" for m in reversed(memories)
+        ))
     deps = session.scalars(select(Task).where(Task.id.in_(task.depends_on)).order_by(Task.id)).all() if task.depends_on else []
     if deps:
         per_dep = max(200, (max_chars // 2) // len(deps))
