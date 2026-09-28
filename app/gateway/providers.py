@@ -5,6 +5,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -162,6 +164,70 @@ class ClaudeAccountProvider:
         )
 
 
+class OllamaProvider:
+    """Mode C: a local Ollama server (free, no account) via its HTTP API (docs.ollama.com — POST
+    /api/chat, stream:false; `format` takes either "json" or a JSON schema object for structured
+    output; usage comes back as prompt_eval_count/eval_count). Base URL from OLLAMA_BASE_URL,
+    default http://localhost:11434 (the port docker.io/ollama/ollama exposes).
+    """
+
+    name = "ollama"
+    free = True  # local inference: no per-call spend, so budget $-checks don't apply
+    timeout_s = 120
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        # `or` (not just the getenv default) also covers OLLAMA_BASE_URL="" — e.g. .env.example's own
+        # unedited line, which os.getenv would otherwise return as-is, breaking the request URL.
+        base_url = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
+        body: dict[str, Any] = {
+            "model": request.model,
+            "messages": [
+                {"role": "system", "content": request.system},
+                {"role": "user", "content": request.user},
+            ],
+            "stream": False,
+            "options": {"num_predict": request.max_output_tokens},
+        }
+        if request.json_schema:
+            body["format"] = request.json_schema
+
+        req = urllib.request.Request(
+            f"{base_url}/api/chat", data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                raw_bytes = resp.read()
+        except urllib.error.HTTPError as e:
+            raise ProviderError(f"Ollama error ({e.code}): {e.read()[:500].decode('utf-8', 'replace')}") from e
+        except urllib.error.URLError as e:
+            raise ProviderError(f"Ollama not reachable at {base_url}: {e.reason}") from e
+        except TimeoutError as e:
+            raise ProviderError(f"Ollama timed out after {self.timeout_s}s") from e
+
+        try:
+            raw = json.loads(raw_bytes)
+        except json.JSONDecodeError as e:
+            raise ProviderError(f"Ollama returned a non-JSON response: {raw_bytes[:500]!r}") from e
+
+        if raw.get("error"):
+            raise ProviderError(f"Ollama error: {raw['error']}")
+        # "length" means num_predict cut the answer short — mirror AnthropicProvider's "max_tokens"
+        # so callers that skip parsing a truncated response (it can't be valid JSON) behave the same.
+        stop_reason = "max_tokens" if raw.get("done_reason") == "length" else ("end_turn" if raw.get("done") else None)
+        text = (raw.get("message") or {}).get("content", "")
+        try:
+            data = json.loads(text) if request.json_schema and stop_reason != "max_tokens" else None
+        except json.JSONDecodeError as e:
+            raise ProviderError(f"Ollama returned invalid JSON for the requested schema: {text[:500]}") from e
+
+        usage = Usage(input_tokens=raw.get("prompt_eval_count", 0), output_tokens=raw.get("eval_count", 0))
+        return ModelResponse(
+            text=text, usage=usage, model=raw.get("model", request.model), data=data,
+            stop_reason=stop_reason, cost_usd=0.0,  # local: no per-call spend
+        )
+
+
 class NotConfiguredProvider:
     """Placeholder for a provider the owner chose but whose adapter/key is not in place yet."""
 
@@ -193,6 +259,7 @@ def default_providers() -> dict[str, Provider]:
     providers: dict[str, Provider] = {
         "anthropic": AnthropicProvider(),
         "claude_account": ClaudeAccountProvider(),
+        "ollama": OllamaProvider(),
         "openai": NotConfiguredProvider("openai"),
     }
     if os.getenv("AGENT_FACTORY_FAKE_MODELS"):

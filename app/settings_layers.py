@@ -35,7 +35,16 @@ DEFAULTS: dict[str, Any] = {
     },
 }
 
-MODEL_ACCESS_PROVIDERS: dict[str, str] = {"api_key": "anthropic", "claude_account": "claude_account"}
+MODEL_ACCESS_PROVIDERS: dict[str, str] = {
+    "api_key": "anthropic",
+    "claude_account": "claude_account",
+    "ollama": "ollama",
+}
+
+# api_key/claude_account keep using Claude model IDs, so only a mode whose provider has a different
+# model namespace (Ollama's local catalog) needs its roles' "model" rewritten too — only when a
+# layer didn't already set one explicitly (see resolve()'s explicit_role_model).
+MODEL_ACCESS_DEFAULT_MODEL: dict[str, str] = {"ollama": "llama3.2"}
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -75,6 +84,7 @@ def resolve(
     ]
     result = copy.deepcopy(DEFAULTS)
     explicit_role_provider: set[str] = set()
+    explicit_role_model: set[str] = set()
     for scope, scope_id in chain:
         if scope_id is None:
             continue
@@ -87,11 +97,18 @@ def resolve(
                 for role, cfg in models_override.items():
                     if isinstance(cfg, dict) and "provider" in cfg:
                         explicit_role_provider.add(role)
+                    if isinstance(cfg, dict) and "model" in cfg:
+                        explicit_role_model.add(role)
             result = deep_merge(result, layer.values)
 
     provider = MODEL_ACCESS_PROVIDERS.get(result.get("model_access"))
+    default_model = MODEL_ACCESS_DEFAULT_MODEL.get(result.get("model_access"))
     if provider is not None and isinstance(result.get("models"), dict):
         for role, cfg in result["models"].items():
-            if role not in explicit_role_provider and isinstance(cfg, dict):
+            if not isinstance(cfg, dict):
+                continue
+            if role not in explicit_role_provider:
                 cfg["provider"] = provider
+            if default_model is not None and role not in explicit_role_model:
+                cfg["model"] = default_model
     return result

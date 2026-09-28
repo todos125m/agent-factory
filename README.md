@@ -151,6 +151,11 @@ that doesn't override it:
   ([code.claude.com/docs/en/setup](https://code.claude.com/docs/en/setup)) and either run `claude`
   once locally to log in, or set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in Docker
   or on a server with no interactive login — see `.env.example`.
+- **`ollama`** (provider `ollama`) — a local Ollama server, free, no account: the gateway calls its
+  HTTP API (`POST /api/chat`, `stream: false`; a JSON schema goes in `format` for structured output).
+  Base URL from `OLLAMA_BASE_URL` (default `http://localhost:11434`). Run it yourself, or
+  `docker compose --profile ollama up` (not started by default) and set `OLLAMA_BASE_URL=http://ollama:11434`;
+  pull a model first with `docker compose exec ollama ollama pull <model>`.
 
 Task states: `CREATED → READY → RUNNING → (WAITING) → COMPLETED → REVIEWED`, with
 `FAILED → READY` (retry, bounded by `max_retries`) or `→ ESCALATED`, and `COMPLETED → READY`

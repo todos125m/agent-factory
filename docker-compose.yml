@@ -25,5 +25,16 @@ services:
       postgres:
         condition: service_healthy
 
+  # Optional, local-only model provider (model_access "ollama") — not started by `docker compose up`;
+  # run `docker compose --profile ollama up` to include it, then `docker compose exec ollama ollama pull <model>`.
+  ollama:
+    image: ollama/ollama
+    profiles: ["ollama"]
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+
 volumes:
   postgres_data:
+  ollama_data:

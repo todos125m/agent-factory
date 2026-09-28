@@ -14,7 +14,8 @@ var RISK_FA = {low:'کم', medium:'متوسط', high:'پرریسک'};
 var APPROVAL_FA = {auto:'خودکار', manager:'مدیر', user:'کاربر'};
 var MODEL_ROLES = ['manager','research','coding','cheap'];
 var ROLE_FA = {manager:'مدیر', research:'پژوهش', coding:'کدنویسی', cheap:'ارزان'};
-var PROVIDERS = ['anthropic','claude_account','openai'];
+var PROVIDERS = ['anthropic','claude_account','ollama','openai'];
+var MODEL_ACCESS_FA = {api_key:'کلید API', claude_account:'حساب Claude خودم', ollama:'Ollama (محلی)'};
 
 /* ============================== api client ============================== */
 
@@ -1141,27 +1142,8 @@ function renderSettings(root){
           selectField('models.' + role + '.effort', 'سطح تلاش', ['low','medium','high'], {low:'کم', medium:'متوسط', high:'زیاد'}))));
     });
     if (resolved.model_access !== undefined){
-      var curAccess = getPath(overrides, 'model_access');
-      var overrideChk = el('input', {type:'checkbox'});
-      overrideChk.checked = curAccess !== undefined;
-      var sw = el('label', {class:'switch'}, el('input', {type:'checkbox'}), el('span', {class:'track'}));
-      var swInput = sw.querySelector('input');
-      var effective = curAccess !== undefined ? curAccess : resolved.model_access;
-      swInput.checked = effective === 'claude_account';
-      function syncSwitchDisabled(){ swInput.disabled = !overrideChk.checked; }
-      syncSwitchDisabled();
-      overrideChk.addEventListener('change', function(){
-        syncSwitchDisabled();
-        if (!overrideChk.checked) unsetPath(overrides, 'model_access');
-        else setPath(overrides, 'model_access', swInput.checked ? 'claude_account' : 'api_key');
-      });
-      swInput.addEventListener('change', function(){
-        setPath(overrides, 'model_access', swInput.checked ? 'claude_account' : 'api_key');
-      });
-      models.appendChild(el('div', {class:'card stack', style:'background:var(--surface-2)'},
-        el('div', {class:'toggle'}, overrideChk, el('span', {text:'بازنویسی نحوه‌ی دسترسی به مدل در این لایه'})),
-        el('div', {class:'toggle'}, sw, el('span', {}, el('b', {text:'کلید API'}), ' / ', el('b', {text:'حساب Claude خودم'})))
-      ));
+      models.appendChild(el('div', {class:'card', style:'background:var(--surface-2)'},
+        selectField('model_access', 'روش دسترسی به مدل', ['api_key','claude_account','ollama'], MODEL_ACCESS_FA)));
     }
 
     var budget = el('fieldset', {}, el('legend', {text:'بودجه و محدودیت‌ها'}),
