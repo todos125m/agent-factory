@@ -6,8 +6,11 @@ Rules: follow docs/ENGINEERING_STANDARD.md (mandatory: evidence-based done, adve
 model calls); `git pull --rebase` before starting and before pushing; branch
 `claude/eager-pascal-xpx6wk`; `/code-review` your diff before pushing; keep each item small.
 
-- [ ] 1. Wait for session "AF ۶" work to land: README status shows "4 — First Agents" as done.
+- [x] 1. Wait for session "AF ۶" work to land: README status shows "4 — First Agents" as done.
       (Supervisor: if not yet, do nothing this run.)
+      Verified 2026-09-28: README.md line 25 shows Phase 4 ✅ (researcher/customer/strategy/product
+      registered + validated against docs/AGENT_BLUEPRINT.md, `/tasks/{id}/run` implemented); full
+      suite green (105/105, `pytest -q`, evidence in commit 32bf165). Prerequisite for item 2 is met.
 - [ ] 2. Benchmark tab «سنجش» (owner decision d12): pick a fixed goal, run the manager plan step on
       2–3 route configs (provider/model/effort) via the gateway, store tokens, cost, duration,
       schema-valid yes/no and an owner 1–5 rating; panel tab to run and compare. Tests with FakeProvider.
