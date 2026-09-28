@@ -31,6 +31,10 @@ def test_complete_maps_result_and_usage_and_zeroes_cost():
     args = run.call_args.args[0]
     assert args[:2] == ["/usr/bin/claude", "-p"] and "--bare" not in args
     assert "--system-prompt" in args and "--output-format" in args
+    # Regression: with built-in tools enabled a role could spend its single turn on a tool call and
+    # fail with error_max_turns (real researcher run, 2026-09-28). Tools must be disabled.
+    assert args[args.index("--tools") + 1] == ""
+    assert args[args.index("--max-turns") + 1] == "3"  # 1 failed real structured-output runs
 
 
 def test_complete_reads_structured_output_when_schema_requested():

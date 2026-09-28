@@ -122,9 +122,16 @@ class ClaudeAccountProvider:
             "--output-format", "json",
             "--system-prompt", request.system,
             "--model", request.model,
-            "--max-turns", "1",
+            # Structured output (--json-schema) can take a second turn to emit the schema-valid answer;
+            # with tools disabled the only extra turns are those retries, so 3 is a tight upper bound.
+            # "1" failed real runs with error_max_turns (num_turns=2).
+            "--max-turns", "3",
             "--permission-prompts", "none",
             "--safe-mode",
+            # No built-in tools: a role completion is one answer, not an agent loop. With tools on, a
+            # model that decides to e.g. web-search spends its only turn on the tool call and the CLI
+            # fails with error_max_turns (seen in a real run of the researcher role).
+            "--tools", "",
         ]
         if request.effort:
             args += ["--effort", request.effort]
