@@ -186,7 +186,7 @@ function renderInbox(root){
       clear(body);
       refreshInboxBadge();
       if (!items.length){
-        body.appendChild(emptyBox('📥', 'چیزی منتظر تو نیست', 'وقتی برنامه‌ای یا نقطه‌ی تصمیمی منتظر بماند، اینجا نشان داده می‌شود.'));
+        body.appendChild(emptyBox('📥', 'چیزی منتظر تو نیست', 'وقتی برنامه، نقطه‌ی تصمیم یا وظیفه‌ی آماده‌ای منتظر تو باشد، اینجا نشان داده می‌شود.'));
         return;
       }
       items.forEach(function(it){ body.appendChild(inboxCard(it, load)); });
@@ -195,14 +195,42 @@ function renderInbox(root){
   load();
 }
 
+var INBOX_KIND_FA = {plan:'برنامه در انتظار تأیید', checkpoint:'نقطه‌ی تصمیم', ready:'آماده‌ی شروع'};
+var INBOX_HEAD_FA = {plan:'فهم مدیر: ', checkpoint:'چالش: ', ready:'وظیفه: '};
+
 function inboxCard(item, onDone){
   var card = el('div', {class:'card stack inbox-card'});
   card.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
-    el('span', {class:'kind', text: item.kind === 'plan' ? 'برنامه در انتظار تأیید' : 'نقطه‌ی تصمیم'}),
+    el('span', {class:'kind', text: INBOX_KIND_FA[item.kind] || item.kind}),
     el('button', {class:'chip', style:'cursor:pointer;border:0', onclick:function(){ go('projects/' + item.project_id); }}, item.project_title)));
-  card.appendChild(el('p', {}, el('b', {text: item.kind === 'plan' ? 'فهم مدیر: ' : 'چالش: '}), item.challenge));
+  card.appendChild(el('p', {}, el('b', {text: INBOX_HEAD_FA[item.kind] || ''}), item.challenge));
 
-  if (item.kind === 'plan'){
+  if (item.kind === 'ready'){
+    var task = (item.options || [])[0] || {};
+    card.appendChild(el('div', {class:'row'}, el('span', {class:'chip', text: 'عهده‌دار: ' + (task.owner || '—')}), riskChip(task.risk)));
+    if (item.why) card.appendChild(el('p', {class:'muted'}, el('b', {text:'هدف: '}), item.why));
+    var startStatus = el('p', {class:'err muted'});
+    var startBtn = el('button', {class:'btn', text:'شروع'});
+    // "Start" = ask the manager for this task's checkpoint (never a bare READY -> RUNNING jump, which
+    // would skip the decision gate): auto-decided in automatic mode, otherwise it becomes a decision card.
+    startBtn.addEventListener('click', function(){
+      startBtn.disabled = true; startStatus.textContent = '';
+      startBtn.textContent = 'مدیر دارد گزینه‌ها را آماده می‌کند…';
+      api('/projects/' + item.project_id + '/tasks/' + item.task_id + '/checkpoint', {method:'POST'}).then(function(r){
+        if (r && r.auto_decided){
+          clear(card);
+          card.appendChild(el('p', {text:'به‌صورت خودکار تصمیم گرفته شد؛ وظیفه در حال اجراست.'}));
+          card.appendChild(el('div', {class:'btn-row'},
+            el('button', {class:'btn sm', onclick:function(){ go('projects/' + item.project_id); }}, 'رفتن به پروژه')));
+          refreshInboxBadge();
+          return;
+        }
+        onDone();
+      }).catch(function(e){ startStatus.textContent = e.message; startBtn.disabled = false; startBtn.textContent = 'شروع'; });
+    });
+    card.appendChild(el('div', {class:'btn-row'}, startBtn));
+    card.appendChild(startStatus);
+  } else if (item.kind === 'plan'){
     var ol = el('div', {class:'stack', style:'gap:6px'});
     (item.options || []).forEach(function(o){
       ol.appendChild(el('div', {class:'row', style:'justify-content:space-between'},

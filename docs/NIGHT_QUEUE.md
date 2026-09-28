@@ -210,6 +210,23 @@ each item (the laptop uses the owner's own Claude account, `model_access: claude
       userinfo, query-string and IP attacks), URL extraction from Persian prose and Markdown, registry
       validation, and the restaurant-blog case end to end through /run — which fails with the guard change
       reverted. No model calls.
-- [ ] 8. **Inbox gap.** READY tasks with no checkpoint yet don't appear in the decision inbox, so
+- [x] 8. **Inbox gap.** READY tasks with no checkpoint yet don't appear in the decision inbox, so
       the owner can't see what is waiting to start. Show them (kind "ready") with a one-tap
       "start" action in web/app.js; tests for the inbox API.
+      Done 2026-09-28: `/inbox` (`app/inbox.py`) also lists READY tasks with no pending checkpoint as kind
+      `ready` (title, owner agent, risk, goal; "waiting since" = the event that made it READY), except in
+      paused projects. A checkpoint opened before its task last became READY (e.g. before a retry) no longer
+      counts as pending, so a retried task shows as ready again instead of its old options. The web inbox
+      renders an «آماده‌ی شروع» card with a one-tap «شروع». Decision: "start" = request the task's
+      checkpoint, never a bare READY → RUNNING (that would skip the decision gate); in automatic mode it is
+      auto-decided (the card says so and links to the project), otherwise the inbox reloads with the new
+      decision card; paused projects' ready tasks are not offered. Verified: `pytest -q` 251/251 green (8
+      new inbox API tests: listing, start → checkpoint without a duplicate, automatic start clears it, only
+      READY listed, paused hidden/restored, retry listed again, stale checkpoint, ordering across kinds; the
+      ready-listing tests fail with the inbox change reverted, and the stale-checkpoint test fails without its
+      filter). On the real server the inbox showed the ready card (task/owner/risk/goal); a tap sent POST
+      /projects/2/tasks/1/checkpoint, which returned 502 here because of item 6's CLI flag issue (no model
+      call, $0), and the card showed the error and re-enabled «شروع»; the auto-decided branch was checked by
+      stubbing that one response in the page; at 375px no element overflows. `/code-review` (high): fixed the
+      stale-checkpoint case above; already raised separately: the checkpoint endpoint ignores
+      `project.paused`, so a card left open on screen can still be started after pausing.

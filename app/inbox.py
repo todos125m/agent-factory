@@ -1,6 +1,7 @@
 """Decision inbox (owner-facing): everything across all projects waiting on the owner —
-plans awaiting approval and checkpoints awaiting a decision. Derived from existing
-RunEvents and Task state; nothing new is stored (§ decision inbox).
+plans awaiting approval, checkpoints awaiting a decision, and READY tasks with no checkpoint yet
+(waiting to start; not listed while their project is paused). Derived from existing RunEvents and
+Task state; nothing new is stored (§ decision inbox).
 """
 
 from typing import Any
@@ -40,6 +41,15 @@ def _pending_checkpoints(events: list[RunEvent]) -> dict[int, RunEvent]:
     }
 
 
+def _last_ready(events: list[RunEvent]) -> dict[int, RunEvent]:
+    """task_id -> the event that last moved it to READY."""
+    last: dict[int, RunEvent] = {}
+    for e in events:
+        if e.type == "task.status_changed" and e.task_id is not None and e.payload.get("to") == "READY":
+            last[e.task_id] = e
+    return last
+
+
 def list_inbox(session: Session) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for project in session.scalars(select(Project).order_by(Project.id)).all():
@@ -66,7 +76,14 @@ def list_inbox(session: Session) -> list[dict[str, Any]]:
                 "created_at": plan_event.created_at,
             })
 
-        for task_id, cp_event in _pending_checkpoints(events).items():
+        last_ready = _last_ready(events)
+        # A checkpoint opened before its task last became READY (e.g. before a retry) is stale: the task
+        # waits to start again, not on that old decision.
+        pending = {
+            tid: cp for tid, cp in _pending_checkpoints(events).items()
+            if tid not in last_ready or cp.id > last_ready[tid].id
+        }
+        for task_id, cp_event in pending.items():
             task = session.get(Task, task_id)
             if task is None or task.status is not TaskStatus.READY:
                 continue
@@ -80,6 +97,26 @@ def list_inbox(session: Session) -> list[dict[str, Any]]:
                 "recommended": cp_event.payload.get("recommended"),
                 "why": cp_event.payload.get("why", ""),
                 "created_at": cp_event.created_at,
+            })
+
+        if project.paused:
+            continue
+        for task in session.scalars(
+            select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.READY).order_by(Task.id)
+        ):
+            if task.id in pending:  # already listed above, as its checkpoint
+                continue
+            goal = (task.input or {}).get("goal")
+            items.append({
+                "kind": "ready",
+                "project_id": project.id,
+                "project_title": project.title,
+                "task_id": task.id,
+                "challenge": task.title,
+                "options": [{"title": task.title, "owner": task.owner, "risk": task.risk.value}],
+                "recommended": None,
+                "why": goal if isinstance(goal, str) else "",
+                "created_at": last_ready[task.id].created_at if task.id in last_ready else task.updated_at,
             })
 
     items.sort(key=lambda i: i["created_at"])

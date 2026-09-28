@@ -88,7 +88,7 @@ Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` �
 |---|---|---|
 | POST | `/projects/{id}/chat` | Owner ↔ manager chat: one `Gateway.call` (goal + compact task list + last 8 messages) → `{reply, suggested_action}`; the UI only ever shows a button for the suggested action, never auto-executes it |
 | GET  | `/projects/{id}/chat` | Chat history for the project |
-| GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval and checkpoints awaiting a decision — derived from existing events, nothing new stored |
+| GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval, checkpoints awaiting a decision, and `READY` tasks with no checkpoint yet (kind `ready`, not listed while the project is paused; the panel's one-tap «شروع» requests the task's checkpoint) — derived from existing events, nothing new stored |
 | POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |
 | GET  | `/agents/{name}/feedback` | Feedback recorded for one agent; turning it into skill updates is a later phase |
 

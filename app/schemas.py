@@ -181,7 +181,7 @@ class FeedbackOut(ORM):
 
 
 class InboxItem(BaseModel):
-    kind: str  # "plan" | "checkpoint"
+    kind: str  # "plan" | "checkpoint" | "ready" (a READY task with no checkpoint yet)
     project_id: int
     project_title: str
     task_id: int | None = None
