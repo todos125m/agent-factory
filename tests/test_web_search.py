@@ -290,10 +290,10 @@ def test_fact_without_url_is_downgraded_to_inference_and_flagged(client, session
     app.dependency_overrides.pop(get_gateway, None)
 
 
-def test_fact_with_url_is_not_downgraded(client, session_factory, project):
+def test_fact_with_a_trusted_source_url_is_not_downgraded(client, session_factory, project):
     pid, tid = _start_researcher_task(client, session_factory, project)
     result = {**BASE_RESULT, "findings": [
-        {"claim": "X grew 40%", "type": "FACT", "basis": "https://example.com/report"},
+        {"claim": "X grew 40%", "type": "FACT", "basis": "https://www.census.gov/report"},
     ]}
     use_fake_role(client, session_factory, "research", [result])
 
@@ -301,7 +301,7 @@ def test_fact_with_url_is_not_downgraded(client, session_factory, project):
     assert r.status_code == 200, r.text
     finding = r.json()["task"]["output"]["findings"][0]
     assert finding["type"] == "FACT"
-    assert finding["basis"] == "https://example.com/report"
+    assert finding["basis"] == "https://www.census.gov/report"
 
     events = [e["type"] for e in client.get(f"/projects/{pid}/events").json()]
     assert "evidence.downgraded" not in events

@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app import sources
 from app.db import Base, SessionLocal, engine
 from app.registry import sync_from_files
 from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
@@ -17,6 +18,7 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(engine)
     with SessionLocal() as session:
         sync_from_files(session)
+    sources.load_rules()  # fail fast on a broken registry/source_tiers.yaml, not mid task run
     yield
 
 

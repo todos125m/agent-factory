@@ -100,7 +100,9 @@ fixed to `["runevent"]`), reasoning from `context.task_context` only — no tool
 specialist shares the `task-execution` skill (the `/run` output shape) and `evidence` (FACT/INFERENCE/
 HYPOTHESIS, never invented sources), plus one domain skill (`research-method`, `customer-voice`,
 `strategy-framing`, `product-definition`). The web panel shows an «اجرا» button on `RUNNING` tasks and
-renders the result with evidence chips per finding.
+renders the result with evidence chips per finding. A deterministic guard downgrades a FACT to INFERENCE,
+with a note in its basis, when it cites no URL or only lowest-tier sources (blogs, forums, social, unknown
+sites); tiers come from domain rules in `registry/source_tiers.yaml` (`app/sources.py`), no model calls.
 
 ## Phase 7 API — Memory
 

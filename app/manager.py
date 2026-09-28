@@ -3,14 +3,13 @@ approval, run per-task decision checkpoints. Deterministic logic (DAG validation
 resolution, state transitions) stays in code; the model only proposes plans and checkpoints.
 """
 
-import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import context, memory, settings_layers
+from app import context, memory, settings_layers, sources
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
@@ -60,25 +59,38 @@ class TaskRunOut(BaseModel):
     next: str
 
 
-_URL_RE = re.compile(r"https?://\S+")
+def _fact_downgrade(basis: str) -> tuple[str, list[str]] | None:
+    """Why a FACT with this basis can't stay a FACT (reason, cited hosts), or None if it can."""
+    urls = sources.cited_urls(basis)
+    if not urls:
+        return "no_url", []
+    hosts = [sources.url_host(u) for u in urls]
+    if all(sources.host_tier(h) == sources.LOWEST_TIER for h in hosts):
+        return "low_tier_sources", list(dict.fromkeys(h or u for h, u in zip(hosts, urls)))
+    return None
 
 
 def _apply_evidence_guard(session: Session, project_id: int, task: Task, result: TaskRunOut) -> TaskRunOut:
-    """Deterministic guard (owner's directive): a FACT is only as good as its source. A finding
-    typed FACT whose basis cites no http(s) URL is downgraded to INFERENCE and flagged in place —
-    the model's own evidence labels are advisory, this check is not."""
-    downgraded_claims: list[str] = []
+    """Deterministic guard (owner's directive): a FACT is only as good as its source. A finding typed
+    FACT is downgraded to INFERENCE, with a note in its basis, when it cites no http(s) URL or when
+    every URL it cites is lowest tier — blog, forum, social or unknown site (app/sources.py, rules in
+    registry/source_tiers.yaml). The model's own evidence labels are advisory, this check is not."""
+    details: list[dict[str, Any]] = []
     findings = []
     for finding in result.findings:
-        if finding.type == "FACT" and not _URL_RE.search(finding.basis):
+        if finding.type == "FACT" and (downgrade := _fact_downgrade(finding.basis)):
+            reason, hosts = downgrade
+            note = ("no source URL cited" if reason == "no_url"
+                    else f"only low-tier sources (blog/forum/unknown): {', '.join(hosts[:5])}")
             finding = finding.model_copy(update={
                 "type": "INFERENCE",
-                "basis": f"{finding.basis} [downgraded from FACT: no source URL cited]",
+                "basis": f"{finding.basis} [downgraded from FACT: {note}]",
             })
-            downgraded_claims.append(finding.claim)
+            details.append({"claim": finding.claim, "reason": reason, "hosts": hosts})
         findings.append(finding)
-    if downgraded_claims:
-        record_event(session, project_id, "evidence.downgraded", task.id, claims=downgraded_claims)
+    if details:
+        record_event(session, project_id, "evidence.downgraded", task.id,
+                     claims=[d["claim"] for d in details], details=details)
     return result.model_copy(update={"findings": findings})
 
 

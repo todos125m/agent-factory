@@ -1,0 +1,141 @@
+# Source-quality tiers for the deterministic FACT guard (app/sources.py, app/manager.py).
+#   1 = official, academic and statistics bodies
+#   2 = app stores, review platforms, company pages and established publishers
+#   3 = blogs, forums, social posts and any unknown site (lowest)
+# A FACT whose cited URLs are all tier 3 is downgraded to INFERENCE with a note in its basis.
+#
+# Matching uses the URL's host only (a leading "www." is ignored; internationalized domains are listed
+# in punycode). A listed domain covers its subdomains and the longest listed match wins; a host whose
+# first label is in `blog_labels` is tier 3 unless that exact host is listed. A company's own site
+# counts as tier 2 only once its domain is listed here. Official country suffixes are listed one by one
+# (not "any gov./ac./go. label"), because in some country domains those are ordinary registrable names
+# (go.to is a redirect service). Edits take effect on restart.
+
+default_tier: 3
+blog_labels: [blog, blogs]
+official_tlds: [gov, edu, mil, int]  # restricted TLDs: census.gov, mit.edu, who.int
+
+tiers:
+  1:
+    # official country suffixes (government / academic)
+    - gov.ir
+    - ac.ir
+    - gov.uk
+    - ac.uk
+    - gc.ca
+    - gov.au
+    - edu.au
+    - govt.nz
+    - ac.nz
+    - go.jp
+    - ac.jp
+    - go.kr
+    - ac.kr
+    - gov.in
+    - ac.in
+    - gov.cn
+    - edu.cn
+    - gov.sg
+    - edu.sg
+    - gov.il
+    - ac.il
+    - gov.tr
+    - edu.tr
+    - gov.za
+    - ac.za
+    - gov.br
+    - gob.mx
+    - gob.es
+    - gouv.fr
+    - gov.ae
+    - gov.sa
+    # governments, intergovernmental bodies and statistics offices outside the rules above
+    - canada.ca
+    - admin.ch
+    - bund.de
+    - un.org
+    - worldbank.org
+    - imf.org
+    - oecd.org
+    - europa.eu
+    - wto.org
+    - ilo.org
+    - unesco.org
+    - insee.fr
+    - destatis.de
+    - istat.it
+    - ine.es
+    - amar.org.ir
+    - cbi.ir
+    - ourworldindata.org
+    - pewresearch.org
+    # scholarly publishers and indexes
+    - arxiv.org
+    - doi.org
+    - nature.com
+    - science.org
+    - sciencedirect.com
+    - springer.com
+    - onlinelibrary.wiley.com
+    - jstor.org
+    - ieee.org
+    - acm.org
+    - ssrn.com
+    - plos.org
+    - semanticscholar.org
+  2:
+    # app stores
+    - apps.apple.com
+    - play.google.com
+    - chromewebstore.google.com
+    - apps.microsoft.com
+    - cafebazaar.ir
+    - myket.ir
+    # review platforms
+    - g2.com
+    - capterra.com
+    - trustpilot.com
+    - getapp.com
+    # market data and research firms
+    - statista.com
+    - gartner.com
+    - forrester.com
+    - mckinsey.com
+    - bcg.com
+    - deloitte.com
+    - pwc.com
+    - crunchbase.com
+    - similarweb.com
+    - cbinsights.com
+    # established news publishers
+    - reuters.com
+    - apnews.com
+    - bloomberg.com
+    - ft.com
+    - wsj.com
+    - nytimes.com
+    - economist.com
+    - bbc.com
+    - bbc.co.uk
+    - cnbc.com
+    - techcrunch.com
+  3:
+    # listed for clarity (unknown sites are tier 3 anyway): blog platforms, forums, social, tertiary
+    - medium.com
+    - substack.com
+    - wordpress.com
+    - blogspot.com
+    - tumblr.com
+    - blogfa.com
+    - blog.ir
+    - virgool.io
+    - reddit.com
+    - quora.com
+    - x.com
+    - twitter.com
+    - facebook.com
+    - instagram.com
+    - linkedin.com
+    - youtube.com
+    - t.me
+    - wikipedia.org  # tertiary: cite the source it summarizes instead

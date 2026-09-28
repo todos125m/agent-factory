@@ -186,11 +186,30 @@ each item (the laptop uses the owner's own Claude account, `model_access: claude
       rejects the `claude_account` provider's `--permission-prompts none` ("unknown option"), so the plan
       call failed before reaching a model (ModelCall ok=false, 0 tokens, $0). Needs the owner's decision
       (CLI version vs. provider flag); not changed here.
-- [ ] 7. **Source quality, not just source presence.** The FACT guard (manager.py ~L68) only checks
+- [x] 7. **Source quality, not just source presence.** The FACT guard (manager.py ~L68) only checks
       that a URL exists; a real run labeled a restaurant blog's survey as FACT. Add a deterministic
       source tier per URL (e.g. official/academic/stats bodies > app stores/company pages > blogs/
       unknown) and downgrade a FACT whose only sources are the lowest tier to INFERENCE with a
       visible note. Keep it deterministic (domain rules in a registry file), no extra model calls.
+      Done 2026-09-28: `app/sources.py` gives each cited URL a tier from host-only rules in
+      `registry/source_tiers.yaml` — 1 official/academic/statistics (restricted TLDs gov/edu/mil/int plus
+      listed country suffixes and bodies), 2 app stores, review platforms, market-data firms, established
+      publishers, 3 blog platforms, forums, social, Wikipedia and every unknown site. `_apply_evidence_guard`
+      now also downgrades a FACT whose URLs are all tier 3 to INFERENCE with a note in its basis
+      ("[downgraded from FACT: only low-tier sources (blog/forum/unknown): <hosts>]"), keeps the no-URL rule,
+      and records `reason`/`hosts` per claim in the `evidence.downgraded` event; the rules file is validated
+      at startup. Decisions: unknown = lowest (the owner's "blogs/unknown"); one better-than-lowest source
+      keeps a FACT; a `blog.`/`blogs.` subdomain stays tier 3 even under a trusted domain; a company page
+      counts as tier 2 only once its domain is listed. Trade-off: a competitor's own pricing page is
+      downgraded until its domain is added; a model can still keep a FACT by citing an irrelevant trusted
+      URL (relevance is not checked). `/code-review` (high) found and fixed 3 real issues before push: a
+      label rule ("gov./ac./go. under any country code") trusted registrable names such as go.to (a redirect
+      service) — replaced by an explicit suffix list; a bare single-label host (`https://gov/x`) got tier 1;
+      internationalized domains could never match an entry (hosts are now normalized to punycode).
+      Verified: `pytest -q` 243/243 green; tests/test_source_tiers.py covers 34 tier cases (incl. lookalike,
+      userinfo, query-string and IP attacks), URL extraction from Persian prose and Markdown, registry
+      validation, and the restaurant-blog case end to end through /run — which fails with the guard change
+      reverted. No model calls.
 - [ ] 8. **Inbox gap.** READY tasks with no checkpoint yet don't appear in the decision inbox, so
       the owner can't see what is waiting to start. Show them (kind "ready") with a one-tap
       "start" action in web/app.js; tests for the inbox API.
