@@ -8,8 +8,9 @@ Verified against openai/openai-python's README/helpers.md (WebFetch, not memory)
 community documentation for details that changed after older training data: `max_tokens` is
 deprecated in favor of `max_completion_tokens` (required by reasoning models, back-compatible with
 the rest); Structured Outputs go through `response_format: {"type": "json_schema", ...}`; and
-`reasoning_effort` (values "low"/"medium"/"high", matching this app's own `effort` field) is the
-reasoning-model equivalent of Anthropic's `effort`. The "system" role (not the newer "developer"
+`reasoning_effort` (values "low"/"medium"/"high") is the reasoning-model equivalent of Anthropic's
+`effort`. This app's `effort` field also allows Anthropic's "xhigh"/"max" (app/schemas.py::Effort);
+a level OpenAI doesn't accept fails at call time. The "system" role (not the newer "developer"
 alias) is used for the stable/cacheable part, since it is the one still guaranteed to work across
 older and current chat models alike.
 

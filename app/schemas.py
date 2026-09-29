@@ -1,9 +1,19 @@
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, ValidationInfo, field_validator
+from pydantic_core import PydanticCustomError
 
+from app.gateway.service import WEB_SEARCH_HARD_CEILING
 from app.models import MemoryCategory, Mode, ProjectStage, RiskLevel, SettingsScope, TaskStatus
+from app.registry import MODEL_ROLES
+from app.settings_layers import MODEL_ACCESS_PROVIDERS
+
+# A USD limit for the budget gate, which blocks a call once `spent + estimate > limit`
+# (app/gateway/service.py::_check_budget). NaN and Infinity (Python's JSON parser accepts both) and
+# absurd finite values such as 1e300 make that comparison never true, silently switching the gate off.
+MAX_BUDGET_USD = 10_000
+Usd = Annotated[float, Field(strict=True, ge=0, le=MAX_BUDGET_USD, allow_inf_nan=False)]
 
 
 class ORM(BaseModel):
@@ -28,7 +38,7 @@ class ProjectCreate(BaseModel):
     title: str
     goal: str
     mode: Mode = Mode.AUTOMATIC
-    budget: float | None = None
+    budget: Usd | None = None  # feeds the resolved budget.project_usd (app/settings_layers.py::resolve)
 
 
 class ProjectOut(ORM):
@@ -117,6 +127,91 @@ class SettingsLayerOut(BaseModel):
     scope: SettingsScope
     scope_id: int
     values: dict[str, Any]
+
+
+# ---------- settings layer values (the keys of app/settings_layers.py::DEFAULTS) ----------
+
+Depth = Literal["quick", "standard", "deep"]
+ApprovalRule = Literal["auto", "manager", "user"]
+# The Messages API's effort levels; null sends none (the "cheap" role's default). Whether a given model
+# supports a level (Haiku 4.5 takes none, OpenAI has no "max") is only known to its provider at call time.
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+ModelAccess = Literal[tuple(MODEL_ACCESS_PROVIDERS)]
+ModelRole = Literal[tuple(sorted(MODEL_ROLES))]
+
+
+def _no_whitespace(value: str) -> str:
+    if any(ch.isspace() for ch in value):
+        raise PydanticCustomError("whitespace", "must not contain spaces")
+    return value
+
+
+# Shape only: provider names are whatever the Gateway was built with (tests register their own), so
+# an unregistered one is reported by Gateway.call ("unknown provider ...") when the role is used.
+ProviderName = Annotated[str, Field(strict=True, min_length=1, max_length=64), AfterValidator(_no_whitespace)]
+ModelId = Annotated[str, Field(strict=True, min_length=1, max_length=200), AfterValidator(_no_whitespace)]
+
+
+class _LayerPart(BaseModel):
+    """A settings layer stores only the keys it overrides: every field here is optional (absent =
+    inherit from the layer above) and nested dicts may be partial, but a key that is sent must hold a
+    valid value, and null is not "inherit". Unknown keys are rejected, since consumers ignore them."""
+
+    model_config = ConfigDict(extra="forbid")
+    _nullable: ClassVar[frozenset[str]] = frozenset()
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _null_is_not_inherit(cls, value: Any, info: ValidationInfo) -> Any:
+        if value is None and info.field_name not in cls._nullable:
+            raise PydanticCustomError("null_setting", "null is not a value; leave the key out to inherit")
+        return value
+
+
+class ApprovalsLayer(_LayerPart):
+    """Risk level -> who decides a checkpoint (app/manager.py::create_checkpoint)."""
+
+    low: ApprovalRule | None = None
+    medium: ApprovalRule | None = None
+    high: ApprovalRule | None = None
+
+
+class BudgetLayer(_LayerPart):
+    project_usd: Usd | None = None
+    task_usd: Usd | None = None
+    # The Messages API's own range: 128K is the largest output any current Claude model allows.
+    max_output_tokens: Annotated[StrictInt, Field(ge=1, le=128_000)] | None = None
+    # 0 turns web search off; a value above the gateway's hard ceiling would be silently cut down to it.
+    max_web_searches: Annotated[StrictInt, Field(ge=0, le=WEB_SEARCH_HARD_CEILING)] | None = None
+
+
+class ContextLayer(_LayerPart):
+    # task_context() drops the sections that don't fit, so at 100 chars or fewer the prompt came out
+    # empty; 200K chars (~50-70K tokens) still fits every supported model's context window.
+    max_chars: Annotated[StrictInt, Field(ge=500, le=200_000)] | None = None
+
+
+class ModelRouteLayer(_LayerPart):
+    _nullable: ClassVar[frozenset[str]] = frozenset({"effort"})
+
+    provider: ProviderName | None = None
+    model: ModelId | None = None
+    effort: Effort | None = None
+
+
+class SettingsLayerIn(_LayerPart):
+    """The values PUT /settings/{scope}/{scope_id} accepts; stored exactly as sent once they pass."""
+
+    mode: Mode | None = None
+    depth: Depth | None = None
+    # A plan is approved as a whole (§8) and each step becomes a paid task: a sanity ceiling well
+    # above the default, not a recommendation.
+    max_steps: Annotated[StrictInt, Field(ge=1, le=50)] | None = None
+    approvals: ApprovalsLayer | None = None
+    budget: BudgetLayer | None = None
+    context: ContextLayer | None = None
+    model_access: ModelAccess | None = None
+    models: dict[ModelRole, ModelRouteLayer] | None = None
 
 
 class SkillOut(ORM):

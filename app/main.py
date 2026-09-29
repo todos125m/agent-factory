@@ -1,7 +1,11 @@
+import math
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import sources
@@ -23,6 +27,19 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Agent Factory", version="0.2.0", lifespan=lifespan)
+
+
+_NON_FINITE_AS_TEXT = {float: lambda f: f if math.isfinite(f) else str(f)}
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's default 422, except that a NaN/Infinity input (Python's JSON parser accepts both) is
+    echoed as text: the default handler can't serialize it and answered 500 instead."""
+    detail = jsonable_encoder(exc.errors(), custom_encoder=_NON_FINITE_AS_TEXT)
+    return JSONResponse(status_code=422, content={"detail": detail})
+
+
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)

@@ -1,7 +1,8 @@
 """Layered settings: defaults ← global ← workspace ← project ← task.
 
 Each layer stores only the keys it overrides; nested dicts merge key by key,
-any other value (lists included) replaces the one above it.
+any other value (lists included) replaces the one above it. PUT /settings validates a layer's
+values against app/schemas.py::SettingsLayerIn (keep it in step with DEFAULTS) before storing them.
 """
 
 import copy

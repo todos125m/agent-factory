@@ -23,6 +23,17 @@ var MEMORY_CATEGORY_FA = {brief:'بریف', decisions:'تصمیم‌ها', resea
 
 var ERR_MAP = {402:'بودجه تمام شد.', 502:'مدل در دسترس نیست.'};
 
+// Our own errors send `detail` as a string; FastAPI's request validation sends a list of {loc, msg}.
+function detailText(detail){
+  if (!Array.isArray(detail)) return String(detail);
+  return detail.map(function(d){
+    if (!d || typeof d !== 'object') return String(d);
+    var loc = (d.loc || []).slice();
+    if (loc[0] === 'body') loc.shift();
+    return (loc.length ? loc.join('.') + ': ' : '') + (d.msg || '');
+  }).join('; ');
+}
+
 function api(path, opts){
   opts = opts || {};
   var init = {method: opts.method || 'GET', headers:{}};
@@ -35,7 +46,7 @@ function api(path, opts){
       var data = null;
       try { data = text ? JSON.parse(text) : null; } catch(e){}
       if (!res.ok){
-        var msg = ERR_MAP[res.status] || (data && data.detail ? String(data.detail) : ('خطا (' + res.status + ')'));
+        var msg = ERR_MAP[res.status] || (data && data.detail ? detailText(data.detail) : ('خطا (' + res.status + ')'));
         var err = new Error(msg);
         err.status = res.status;
         throw err;

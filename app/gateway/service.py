@@ -1,5 +1,6 @@
 """Model gateway: role → provider/model routing, budget checks, token and cost logging (§29–§31)."""
 
+import math
 import time
 from typing import Any
 
@@ -130,9 +131,15 @@ class Gateway:
         if project_id is not None:
             checks.append(("project", spent_usd(self.session, project_id=project_id), float(budget["project_usd"])))
         for scope, spent, limit in checks:
-            if spent + estimate > limit:
+            # Fail closed, like WEB_SEARCH_HARD_CEILING: NaN/inf make `spent + estimate > limit` never
+            # true. PUT /settings and ProjectCreate reject such limits; this guards rows stored before that.
+            finite = math.isfinite(limit)
+            if not finite or spent + estimate > limit:
                 if project_id is not None:
-                    record_event(self.session, project_id, "budget.exceeded", task_id,
-                                 scope=scope, spent_usd=round(spent, 4), limit_usd=limit)
+                    record_event(self.session, project_id, "budget.exceeded", task_id, scope=scope,
+                                 spent_usd=round(spent, 4), limit_usd=limit if finite else str(limit))
                     self.session.commit()
-                raise BudgetExceeded(f"{scope} budget ${limit} would be exceeded (spent ${spent:.4f})")
+                raise BudgetExceeded(
+                    f"{scope} budget ${limit} would be exceeded (spent ${spent:.4f})" if finite
+                    else f"{scope} budget is not a finite number ({limit}); fix it in the settings"
+                )

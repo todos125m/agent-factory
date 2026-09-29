@@ -136,7 +136,7 @@ def test_explicit_role_provider_overrides_model_access(session):
 
 
 def test_malformed_models_layer_does_not_crash_resolve(session):
-    """A layer with a bad shape for `models` (bypassing PUT's shallow key check) must not break
+    """A layer with a bad shape for `models` (stored without PUT's validation, e.g. before it existed) must not break
     resolution for every other caller — it's just ignored for the model_access rewrite."""
     from app.models import SettingsLayer, SettingsScope
 
