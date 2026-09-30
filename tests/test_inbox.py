@@ -136,6 +136,27 @@ def test_paused_project_ready_tasks_are_not_offered_to_start(client, manual_proj
     assert _kinds(client) == [("ready", t["id"])]
 
 
+def test_paused_project_hides_every_card_until_resume(client, session_factory, manual_project):
+    """Owner decision d17: while paused, every action on these cards is refused, so none are listed."""
+    pid = manual_project["id"]
+    t = _ready_task(client, pid, risk="low")
+    use_fake(client, session_factory, [CHECKPOINT, GOOD_PLAN])
+    client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint")
+    register_researcher(client)
+    client.post(f"/projects/{pid}/plan")
+    other = client.post("/projects", json={"owner_id": manual_project["owner_id"], "title": "Other", "goal": "g",
+                                          "mode": "manual_learning"}).json()
+    other_task = _ready_task(client, other["id"])
+    listed = _kinds(client)
+    assert listed == [("checkpoint", t["id"]), ("plan", None), ("ready", other_task["id"])]
+
+    client.post(f"/projects/{pid}/pause", json={"paused": True})
+    assert _kinds(client) == [("ready", other_task["id"])]  # only the paused project's cards go
+    client.post(f"/projects/{pid}/pause", json={"paused": False})
+    assert _kinds(client) == listed
+    app.dependency_overrides.pop(get_gateway, None)
+
+
 def test_retried_task_is_listed_again(client, session_factory, manual_project):
     """FAILED -> READY after a decided checkpoint: no pending checkpoint, so it waits to start again."""
     pid = manual_project["id"]

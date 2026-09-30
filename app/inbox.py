@@ -1,7 +1,8 @@
 """Decision inbox (owner-facing): everything across all projects waiting on the owner —
 plans awaiting approval, checkpoints awaiting a decision, and READY tasks with no checkpoint yet
-(waiting to start; not listed while their project is paused). Derived from existing RunEvents and
-Task state; nothing new is stored (§ decision inbox).
+(waiting to start). A paused project lists nothing until it is resumed (owner decision d17): every
+action on its cards is refused while paused, and its own page still shows its plan and tasks.
+Derived from existing RunEvents and Task state; nothing new is stored (§ decision inbox).
 """
 
 from typing import Any
@@ -53,6 +54,8 @@ def _last_ready(events: list[RunEvent]) -> dict[int, RunEvent]:
 def list_inbox(session: Session) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for project in session.scalars(select(Project).order_by(Project.id)).all():
+        if project.paused:
+            continue
         events = list(session.scalars(
             select(RunEvent).where(RunEvent.project_id == project.id).order_by(RunEvent.id)
         ))
@@ -99,8 +102,6 @@ def list_inbox(session: Session) -> list[dict[str, Any]]:
                 "created_at": cp_event.created_at,
             })
 
-        if project.paused:
-            continue
         for task in session.scalars(
             select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.READY).order_by(Task.id)
         ):
