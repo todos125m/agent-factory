@@ -33,6 +33,7 @@
 | Research across many sources before a product decision | `anthropic-skills:deep-research` |
 | Any code that calls Claude (gateway, prompts, caching, cost) | `claude-api` (and `/claude-api cost-optimize` when spend grows) |
 | Building an eval / "is the manager's plan good?" / Benchmark tab | `/claude-api build-eval`, then `/claude-api hillclimb` |
+| Before every final report, and before deferring, skipping or asking | `no-dodging` (`.claude/skills/no-dodging`) |
 | Before every push: correctness | `/code-review` on the branch diff |
 | Before every push touching auth, keys, tools, permissions | `/security-review` |
 | After a feature lands: tidy the code | `/simplify` |
