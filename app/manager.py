@@ -6,18 +6,40 @@ resolution, state transitions) stays in code; the model only proposes plans and 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import context, memory, settings_layers, sources
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
-from app.state_machine import TransitionError, check_task_transition
+from app.state_machine import ProjectPaused, TransitionError, check_project_active, check_task_transition
 
 
 class ManagerError(ValueError):
     """A plan or checkpoint response failed a deterministic, code-side check."""
+
+
+def ensure_active(session: Session, project: Project, action: str, task_id: int | None = None, **detail: Any) -> None:
+    """The pause policy (check_project_active), applied in one place: every entry point that would spend a
+    model call or move a task to READY/RUNNING calls this before changing anything. A refusal is recorded
+    (like `budget.exceeded`) so the owner can see what the pause stopped; routers answer it with 409."""
+    try:
+        check_project_active(project.paused)
+    except ProjectPaused:
+        record_event(session, project.id, "pause.blocked", task_id, action=action, **detail)
+        session.commit()
+        raise
+
+
+def _paused_now(session: Session, project: Project) -> bool:
+    """Fresh read of `paused` for work already past `ensure_active`: the owner may have paused while its
+    model call ran, and loaded objects are never expired here. Flushing first and reading FOR UPDATE keep
+    a pause from landing between this check and the caller's commit (SQLite: the flush takes the write
+    lock; PostgreSQL: the row lock)."""
+    session.flush()
+    session.refresh(project, attribute_names=["paused"], with_for_update=True)
+    return project.paused
 
 
 class PlanStepIn(BaseModel):
@@ -150,6 +172,7 @@ def _plan_user_content(session: Session, project: Project, feedback: str | None)
 
 
 def create_plan(session: Session, gateway: Gateway, project: Project, *, feedback: str | None = None) -> dict[str, Any]:
+    ensure_active(session, project, "plan")
     settings = settings_layers.resolve(session, project_id=project.id)
     system = context.system_prompt(session, manager_agent(session), ["plan-goal", "delegate", "evidence"])
     user = _plan_user_content(session, project, feedback)
@@ -220,6 +243,7 @@ def _promote_ready(session: Session, project_id: int, tasks: list[Task], reason:
 
 
 def approve_plan(session: Session, project: Project) -> dict[str, Any]:
+    ensure_active(session, project, "plan.approve")
     tasks = session.scalars(select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED)).all()
     ready_ids = _promote_ready(session, project.id, tasks, "plan approved")
     record_event(session, project.id, "decision.plan_approved", None, ready_task_ids=ready_ids)
@@ -228,6 +252,8 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
 
 
 def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
+    # Refused before deleting anything: the router re-plans right after, which a pause refuses too.
+    ensure_active(session, project, "plan.reject")
     last_plan = session.scalar(
         select(RunEvent)
         .where(RunEvent.project_id == project.id, RunEvent.type == "plan.proposed")
@@ -247,6 +273,7 @@ def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
 
 
 def create_checkpoint(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
+    ensure_active(session, project, "checkpoint", task.id)
     system = context.system_prompt(session, manager_agent(session), ["decision-checkpoint", "evidence"])
     user = context.task_context(session, task)
     response = gateway.call(
@@ -262,8 +289,14 @@ def create_checkpoint(session: Session, gateway: Gateway, project: Project, task
     record_event(session, project.id, "checkpoint.created", task.id, **checkpoint.model_dump())
 
     settings = settings_layers.resolve(session, task_id=task.id)
-    rule = settings["approvals"][task.risk.value]
-    auto = settings["mode"] == "automatic" and rule != "user"
+    approvals = settings.get("approvals")
+    rule = approvals.get(task.risk.value) if isinstance(approvals, dict) else None
+    # Allowlist, not `!= "user"`: an unknown or malformed rule (e.g. a stored typo) waits for the owner.
+    auto = settings["mode"] == "automatic" and rule in ("auto", "manager")
+    if auto and _paused_now(session, project):
+        # Paused while the model call ran: keep the paid-for checkpoint, leave the decision to the owner.
+        record_event(session, project.id, "pause.withheld", task.id, action="auto_decide")
+        auto = False
     if auto:
         _decide(session, task, checkpoint.recommended, None, auto=True)
     session.commit()
@@ -277,22 +310,51 @@ def _decide(session: Session, task: Task, option: int, note: str | None, *, auto
     task.status = TaskStatus.RUNNING
 
 
-def decide(session: Session, task: Task, option: int, note: str | None) -> None:
+def decide(session: Session, project: Project, task: Task, option: int, note: str | None) -> None:
+    ensure_active(session, project, "decide", task.id)
     _decide(session, task, option, note, auto=False)
     session.commit()
 
 
-def _promote_ready_dependents(session: Session, project: Project, task: Task) -> list[int]:
-    """CREATED tasks depending on `task` whose dependencies are now all done become READY (§33)."""
+def _created_dependents(session: Session, project: Project, task: Task) -> list[Task]:
     dependent_ids = select(TaskDependency.task_id).where(TaskDependency.depends_on_id == task.id)
-    dependents = session.scalars(
+    return list(session.scalars(
         select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED, Task.id.in_(dependent_ids))
+    ))
+
+
+def _promote_ready_dependents(
+    session: Session, project: Project, task: Task, reason: str = "dependency completed"
+) -> list[int]:
+    """CREATED tasks depending on `task` whose dependencies are now all done become READY (§33)."""
+    return _promote_ready(session, project.id, _created_dependents(session, project, task), reason)
+
+
+def release_withheld(session: Session, project: Project) -> list[int]:
+    """On resume: promote the dependents that runs finishing during the pause withheld (see run_task).
+    A withheld auto-decision is not taken here — its checkpoint waits for the owner like any other."""
+    session.flush()  # the resume first: a run finishing concurrently then either sees it or is seen below
+    last_pause = session.scalar(
+        select(func.max(RunEvent.id)).where(RunEvent.project_id == project.id, RunEvent.type == "project.paused")
+    )
+    withheld = session.scalars(
+        select(RunEvent)
+        .where(RunEvent.project_id == project.id, RunEvent.type == "pause.withheld", RunEvent.id > (last_pause or 0))
+        .order_by(RunEvent.id)
     ).all()
-    return _promote_ready(session, project.id, dependents, "dependency completed")
+    ready_ids: list[int] = []
+    for event in withheld:
+        if event.payload.get("action") != "promote_dependents" or event.task_id is None:
+            continue
+        task = session.get(Task, event.task_id)
+        if task is not None:
+            ready_ids += _promote_ready_dependents(session, project, task, reason="project resumed")
+    return ready_ids
 
 
 def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
     """Execute a RUNNING task with its owner agent: one Gateway.call, deterministic result handling."""
+    ensure_active(session, project, "run", task.id)
     if task.status is not TaskStatus.RUNNING:
         raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
     check_task_transition(task.status, TaskStatus.COMPLETED, dependency_statuses=[],
@@ -327,6 +389,12 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     memory.capture_from_task_output(session, project, task, agent.name, result, mode=task_settings["mode"])
     session.flush()  # dependents' status query below must see this task's new COMPLETED status
 
-    ready_ids = _promote_ready_dependents(session, project, task)
+    if _paused_now(session, project):
+        # Paused while the model call ran: keep the paid-for result; release_withheld promotes on resume.
+        if _created_dependents(session, project, task):
+            record_event(session, project.id, "pause.withheld", task.id, action="promote_dependents")
+        ready_ids = []
+    else:
+        ready_ids = _promote_ready_dependents(session, project, task)
     session.commit()
     return {"task": task, "ready_task_ids": ready_ids}

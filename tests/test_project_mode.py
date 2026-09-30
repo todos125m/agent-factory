@@ -61,6 +61,21 @@ def test_automatic_project_still_waits_on_high_risk(client, session_factory):
     app.dependency_overrides.pop(get_gateway, None)
 
 
+@pytest.mark.parametrize("approvals", [{"high": "usr"}, "user"])
+def test_unknown_approval_rule_waits_for_the_owner(client, session_factory, approvals):
+    """Fail closed: only "auto"/"manager" auto-decide. `rule != "user"` let a stored typo ("usr", saved
+    before PUT validated values) auto-decide a high-risk task; a non-dict `approvals` raised a 500."""
+    pid = _project(client, "automatic")["id"]
+    with session_factory() as s:
+        s.add(SettingsLayer(scope=SettingsScope.PROJECT, scope_id=pid, values={"approvals": approvals}))
+        s.commit()
+    t = _ready_task(client, pid, risk="high")
+    use_fake(client, session_factory, [CHECKPOINT])
+    assert client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint").json()["auto_decided"] is False
+    assert client.get(f"/projects/{pid}/tasks/{t['id']}").json()["status"] == "READY"
+    app.dependency_overrides.pop(get_gateway, None)
+
+
 @pytest.mark.parametrize("project_mode,task_mode,auto", [
     ("manual_learning", "automatic", True),
     ("automatic", "manual_learning", False),

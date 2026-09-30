@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.events import record_event
+from app.manager import ensure_active
 from app.models import Task, TaskDependency, TaskStatus
 from app.routers.projects import load_project
 from app.schemas import TaskCreate, TaskOut, TaskTransition
@@ -74,9 +75,9 @@ def get_task(project_id: int, task_id: int, session: Session = Depends(get_sessi
 def transition_task(project_id: int, task_id: int, body: TaskTransition, session: Session = Depends(get_session)):
     project = load_project(session, project_id)
     task = load_task(session, project_id, task_id)
-    if project.paused and body.status in {TaskStatus.READY, TaskStatus.RUNNING}:
-        raise HTTPException(409, "Project is paused")
     try:
+        if body.status in {TaskStatus.READY, TaskStatus.RUNNING}:
+            ensure_active(session, project, "transition", task.id, to=body.status.value)
         check_task_transition(
             task.status,
             body.status,

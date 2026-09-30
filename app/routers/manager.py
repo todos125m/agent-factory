@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,12 +16,14 @@ from app.state_machine import TransitionError
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["manager"])
 
+T = TypeVar("T")
+
 
 def get_gateway(session: Session = Depends(get_session)) -> Gateway:
     return Gateway(session)
 
 
-def _run(fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[str, Any]:
+def _run(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     try:
         return fn(*args, **kwargs)
     except ManagerError as e:
@@ -30,7 +32,7 @@ def _run(fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[s
         raise HTTPException(402, str(e)) from e
     except ProviderError as e:
         raise HTTPException(502, str(e)) from e
-    except TransitionError as e:
+    except TransitionError as e:  # incl. ProjectPaused: every route here is refused while paused
         raise HTTPException(409, str(e)) from e
 
 
@@ -56,7 +58,7 @@ def create_plan(project_id: int, session: Session = Depends(get_session), gatewa
 @router.post("/plan/approve")
 def approve_plan(project_id: int, session: Session = Depends(get_session)):
     project = load_project(session, project_id)
-    return manager.approve_plan(session, project)
+    return _run(manager.approve_plan, session, project)
 
 
 @router.post("/plan/reject")
@@ -64,7 +66,7 @@ def reject_plan(
     project_id: int, body: PlanReject, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
 ):
     project = load_project(session, project_id)
-    manager.reject_plan(session, project, body.feedback)
+    _run(manager.reject_plan, session, project, body.feedback)
     return _run(manager.create_plan, session, gateway, project, feedback=body.feedback)
 
 
@@ -79,12 +81,9 @@ def create_checkpoint(
 
 @router.post("/tasks/{tid}/decide", response_model=TaskOut)
 def decide(project_id: int, tid: int, body: DecisionIn, session: Session = Depends(get_session)):
-    load_project(session, project_id)
+    project = load_project(session, project_id)
     task = load_task(session, project_id, tid)
-    try:
-        manager.decide(session, task, body.option, body.note)
-    except TransitionError as e:
-        raise HTTPException(409, str(e)) from e
+    _run(manager.decide, session, project, task, body.option, body.note)
     return task
 
 

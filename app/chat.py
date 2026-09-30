@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import context
 from app.gateway.service import Gateway
-from app.manager import ManagerError, manager_agent
+from app.manager import ManagerError, ensure_active, manager_agent
 from app.models import ChatMessage, Project, Task
 
 _ACTION_RE = re.compile(r"^(none|plan|approve|checkpoint:\d+)$")
@@ -45,6 +45,7 @@ def _chat_user_content(session: Session, project: Project) -> str:
 
 
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:
+    ensure_active(session, project, "chat")
     user_msg = ChatMessage(project_id=project.id, role="user", text=text)
     session.add(user_msg)
     session.flush()  # so the user's own message counts toward the last-8 window

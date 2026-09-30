@@ -65,7 +65,7 @@ The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 | POST | `/users` | Create user |
 | POST | `/projects` | Create project (`mode`: `automatic` / `manual_learning`) |
 | POST | `/projects/{id}/stage` | Advance project stage (IDEA → DISCOVERY → … → ITERATION) |
-| POST | `/projects/{id}/pause` | Pause / resume |
+| POST | `/projects/{id}/pause` | Pause / resume. While paused nothing spends a model call or moves a task to `READY`/`RUNNING`: plan, approve, reject, checkpoint, decide, run, chat, a transition to `READY`/`RUNNING` and a stage advance answer 409 before doing anything, each logged as `pause.blocked` (one check, `app/manager.py::ensure_active`). A call already in flight when the pause lands keeps its paid-for result, but its `READY`/`RUNNING` move is withheld (`pause.withheld`): a checkpoint is not auto-decided and waits for the owner; a finished run's dependents are promoted on resume |
 | GET  | `/projects/{id}/events` | Audit log of every transition |
 | POST | `/projects/{id}/tasks` | Create task with `depends_on` (DAG) |
 | GET  | `/projects/{id}/tasks/runnable` | Tasks whose dependencies are done — safe to run in parallel |
@@ -82,13 +82,15 @@ The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 | POST | `/projects/{id}/tasks/{tid}/decide` | `{option, note?}` → records the decision, moves the task `READY → RUNNING` |
 | POST | `/projects/{id}/tasks/{tid}/run` | Executes a `RUNNING` task with its owner agent (Phase 4): one `Gateway.call` (agent's role + skills + `context.task_context`, which includes the chosen option and dependency summaries) → `{summary, findings[{claim,type,basis}], lesson, next}`; stores the output, moves `RUNNING → COMPLETED`, and any dependent task whose dependencies are now all done becomes `READY` |
 
-Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502).
+Every step above is a single, budget-checked `Gateway.call` (`BudgetExceeded` → 402, `ProviderError` → 502;
+a paused project → 409 before any call). In automatic mode a checkpoint is auto-decided only when the risk's
+approval rule is `auto` or `manager`; any other value waits for the owner.
 
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/projects/{id}/chat` | Owner ↔ manager chat: one `Gateway.call` (goal + compact task list + last 8 messages) → `{reply, suggested_action}`; the UI only ever shows a button for the suggested action, never auto-executes it |
 | GET  | `/projects/{id}/chat` | Chat history for the project |
-| GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval, checkpoints awaiting a decision, and `READY` tasks with no checkpoint yet (kind `ready`, not listed while the project is paused; the panel's one-tap «شروع» requests the task's checkpoint) — derived from existing events, nothing new stored |
+| GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval, checkpoints awaiting a decision, and `READY` tasks with no checkpoint yet (kind `ready`; the panel's one-tap «شروع» requests the task's checkpoint). A paused project lists nothing until it is resumed (owner decision d17); its own page still shows its plan and tasks — derived from existing events, nothing new stored |
 | POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |
 | GET  | `/agents/{name}/feedback` | Feedback recorded for one agent; turning it into skill updates is a later phase |
 

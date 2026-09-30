@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import manager
 from app import memory as memory_module
 from app import settings_layers
 from app.db import get_session
@@ -53,9 +54,8 @@ def get_project(project_id: int, session: Session = Depends(get_session)):
 @router.post("/{project_id}/stage", response_model=ProjectOut)
 def advance_stage(project_id: int, body: ProjectStageUpdate, session: Session = Depends(get_session)):
     project = load_project(session, project_id)
-    if project.paused:
-        raise HTTPException(409, "Project is paused")
     try:
+        manager.ensure_active(session, project, "stage", to=body.stage.value)
         check_project_advance(project.stage, body.stage)
     except TransitionError as e:
         raise HTTPException(409, str(e)) from e
@@ -71,6 +71,8 @@ def set_paused(project_id: int, body: ProjectPauseUpdate, session: Session = Dep
     if project.paused != body.paused:
         project.paused = body.paused
         record_event(session, project.id, "project.paused" if body.paused else "project.resumed")
+        if not body.paused:
+            manager.release_withheld(session, project)
         session.commit()
     return project
 

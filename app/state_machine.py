@@ -29,6 +29,17 @@ class TransitionError(ValueError):
     pass
 
 
+class ProjectPaused(TransitionError):
+    pass
+
+
+def check_project_active(paused: bool) -> None:
+    """A project can be paused at any stage (§40); while paused no task moves to READY/RUNNING and no
+    model call is made (app/manager.py::ensure_active applies this and records the refusal)."""
+    if paused:
+        raise ProjectPaused("Project is paused")
+
+
 def check_task_transition(
     current: TaskStatus,
     target: TaskStatus,
