@@ -22,7 +22,7 @@ from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
 from app.state_machine import TASK_TRANSITIONS, ProjectPaused, TransitionError, check_task_transition
 from tests.test_manager import _ready_task
-from tests.test_project_pause import _assert_refused, _events, _pause, _status, file_client  # noqa: F401
+from tests.test_project_pause import _assert_refused, _events, _pause, _status
 
 ALLOWED = {"dependency_statuses": [], "retries": 0, "max_retries": 2}
 STARTS = {TaskStatus.READY, TaskStatus.RUNNING}  # d16's words, not app.state_machine.START_STATUSES under test
@@ -202,15 +202,15 @@ def test_only_the_paused_project_is_refused(client, project):
     assert "pause.blocked" not in {e["type"] for p in (project, other) for e in _events(client, p["id"])}
 
 
-def test_the_commit_holds_off_a_pause_until_the_moves_have_landed(file_client, monkeypatch):
+@pytest.mark.parametrize("db_engine", ["file"], indirect=True)
+def test_the_commit_holds_off_a_pause_until_the_moves_have_landed(client, session_factory, monkeypatch):
     """On separate connections (file SQLite): once the commit's locked read has seen the project active, the
     owner's pause can't commit before the moves do — it waits for the write lock (here it gives up after
     0.1 s), so the moves land before the pause, never after it."""
-    client, factory = file_client
     user = client.post("/users", json={"email": "l@example.com"}).json()
     pid = client.post("/projects", json={"owner_id": user["id"], "title": "P", "goal": "g"}).json()["id"]
     t = _created_task(client, pid)
-    owner_engine = create_engine(factory.kw["bind"].url, connect_args={"timeout": 0.1})
+    owner_engine = create_engine(session_factory.kw["bind"].url, connect_args={"timeout": 0.1})
     owner = sessionmaker(bind=owner_engine, autoflush=False, expire_on_commit=False)
     held_off = []
     paused = pause._paused

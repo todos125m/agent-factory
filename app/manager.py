@@ -30,11 +30,13 @@ def ensure_active(session: Session, project: Project, action: str, task_id: int 
 
 def _paused_now(session: Session, project: Project) -> bool:
     """Fresh read of `paused` for work already past `ensure_active`: the owner may have paused while its
-    model call ran, and loaded objects are never expired here. Flushing first and reading FOR UPDATE keep
-    a pause from landing between this check and the caller's commit (SQLite: the flush takes the write
-    lock; PostgreSQL: the row lock)."""
+    model call ran, and loaded objects are never expired here. Flushing first and reading under a row lock keep
+    a pause from landing between this check and the caller's commit (SQLite: the flush takes the write lock;
+    PostgreSQL: FOR NO KEY UPDATE, as app/pause.py's commit guard — it conflicts with the pause's UPDATE but not
+    with the KEY SHARE locks the flushed rows' foreign keys take on the project row, so two completions in one
+    project queue instead of deadlocking)."""
     session.flush()
-    session.refresh(project, attribute_names=["paused"], with_for_update=True)
+    session.refresh(project, attribute_names=["paused"], with_for_update={"key_share": True})
     return project.paused
 
 
@@ -167,8 +169,8 @@ def _plan_user_content(session: Session, project: Project, feedback: str | None)
     return "\n".join(lines)
 
 
-def create_plan(session: Session, gateway: Gateway, project: Project, *, feedback: str | None = None) -> dict[str, Any]:
-    ensure_active(session, project, "plan")
+def _propose_plan(session: Session, gateway: Gateway, project: Project, feedback: str | None) -> PlanIn:
+    """The model call and every check on its plan; stages nothing."""
     settings = settings_layers.resolve(session, project_id=project.id)
     system = context.system_prompt(session, manager_agent(session), ["plan-goal", "delegate", "evidence"])
     user = _plan_user_content(session, project, feedback)
@@ -181,7 +183,18 @@ def create_plan(session: Session, gateway: Gateway, project: Project, *, feedbac
     except ValidationError as e:
         raise ManagerError(f"invalid plan response: {e}") from e
     _validate_dag(plan.steps, int(settings["max_steps"]))
+    return plan
 
+
+def create_plan(session: Session, gateway: Gateway, project: Project) -> dict[str, Any]:
+    ensure_active(session, project, "plan")
+    result = _add_plan(session, project, _propose_plan(session, gateway, project, None))
+    session.commit()
+    return result
+
+
+def _add_plan(session: Session, project: Project, plan: PlanIn) -> dict[str, Any]:
+    """Stage a checked plan: its tasks (CREATED) and dependencies, and its events. The caller commits."""
     task_ids: list[int | None] = []
     specialists_requested: list[str] = []
     for step in plan.steps:
@@ -212,7 +225,6 @@ def create_plan(session: Session, gateway: Gateway, project: Project, *, feedbac
     record_event(session, project.id, "plan.proposed", None,
                  understanding=plan.understanding, assumptions=plan.assumptions, task_ids=created_ids)
     record_event(session, project.id, "approval.requested", None, task_ids=created_ids)
-    session.commit()
     return {
         "understanding": plan.understanding,
         "assumptions": plan.assumptions,
@@ -247,10 +259,13 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
     return {"ready_task_ids": ready_ids}
 
 
-def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
-    # Refused before deleting anything, and not committed here: the router re-plans right after in the same
-    # session, so a pause that refuses the re-plan rolls the rejection back instead of deleting it for nothing.
+def reject_plan(session: Session, gateway: Gateway, project: Project, feedback: str) -> dict[str, Any]:
+    """Reject the last proposed plan and re-plan with the owner's feedback, as one unit: nothing is staged until
+    the new plan is in (its model call returned and passed every check), so a refused or failed re-plan
+    (pause, budget, provider error, invalid plan) leaves the old plan as it was, and the gateway's own commits
+    carry none of the rejection. The rejection and the new plan then land in one commit."""
     ensure_active(session, project, "plan.reject")
+    plan = _propose_plan(session, gateway, project, feedback)
     last_plan = session.scalar(
         select(RunEvent)
         .where(RunEvent.project_id == project.id, RunEvent.type == "plan.proposed")
@@ -265,7 +280,9 @@ def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
     for t in tasks:
         session.delete(t)
     record_event(session, project.id, "decision.plan_rejected", None, feedback=feedback, deleted_task_ids=deleted_ids)
-    return deleted_ids
+    result = _add_plan(session, project, plan)
+    session.commit()
+    return result
 
 
 def create_checkpoint(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:

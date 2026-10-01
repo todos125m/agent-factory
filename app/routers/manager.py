@@ -66,8 +66,7 @@ def reject_plan(
     project_id: int, body: PlanReject, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
 ):
     project = load_project(session, project_id)
-    _run(manager.reject_plan, session, project, body.feedback)
-    return _run(manager.create_plan, session, gateway, project, feedback=body.feedback)
+    return _run(manager.reject_plan, session, gateway, project, body.feedback)
 
 
 @router.post("/tasks/{tid}/checkpoint")

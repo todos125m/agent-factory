@@ -7,17 +7,14 @@ project's model call itself too, for a path that skips the manager's check. Fake
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy import event
+from sqlalchemy.dialects import postgresql
 
 from app import manager
-from app.db import Base, SessionLocal, get_session, make_engine
-from app.gateway.providers import FakeProvider
+from app.gateway.providers import FakeProvider, ProviderError
 from app.gateway.service import Gateway
 from app.main import app
 from app.models import ModelCall, Project, Task
-from app.registry import sync_from_files
 from app.routers.manager import get_gateway
 from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
@@ -106,8 +103,7 @@ def _approved_plan(client, pid):
     return tasks["Research"], tasks["Define product"]
 
 
-# Every project route that makes a model call: (path, setup, request body, reply). plan/reject enters the call
-# with its rejection staged in the same session, not yet written.
+# Every project route that makes a model call: (path, setup, request body, reply).
 MODEL_CALL_PATHS = pytest.mark.parametrize("path, setup, body, reply", [
     ("plan", None, None, PLAN),
     ("plan/reject", None, {"feedback": "too shallow"}, PLAN),
@@ -338,40 +334,76 @@ def test_a_route_that_does_not_map_the_refusal_still_answers_409(client, project
     assert fake.requests == []
 
 
-@pytest.mark.parametrize("skip_ensure_active, refused_by", [(False, "plan"), (True, "model_call")],
-                         ids=["entry_check", "gateway"])
-def test_a_pause_landing_mid_reject_keeps_the_plan(
-    client, session_factory, project, monkeypatch, skip_ensure_active, refused_by
-):
-    """Reject and re-plan are one unit: when the owner pauses right after the rejection is staged, the
-    re-plan is refused (by its entry check, or by the gateway on a path that skips it) and the rejection is
-    rolled back with it — the plan is not deleted for nothing."""
+def test_a_pause_after_the_reject_check_keeps_the_plan(client, session_factory, project, monkeypatch):
+    """Reject and re-plan are one unit: when the owner pauses right after the reject's entry check, the
+    re-plan's model call is refused by the gateway before anything was rejected — the plan is not deleted for
+    nothing."""
     pid = project["id"]
     fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, PLAN]))
     client.post(f"/projects/{pid}/plan")
     tasks = client.get(f"/projects/{pid}/tasks").json()
-    reject_plan = manager.reject_plan
+    ensure_active = manager.ensure_active
 
-    def reject_then_the_owner_pauses(session, project, feedback):
-        deleted = reject_plan(session, project, feedback)
+    def check_then_the_owner_pauses(*args, **kwargs):
+        ensure_active(*args, **kwargs)
         with session_factory() as s:  # the owner's pause request, in its own session
             set_paused(pid, ProjectPauseUpdate(paused=True), session=s)
-        return deleted
 
-    monkeypatch.setattr("app.manager.reject_plan", reject_then_the_owner_pauses)
-    if skip_ensure_active:
-        monkeypatch.setattr("app.manager.ensure_active", lambda *a, **kw: None)
-
+    monkeypatch.setattr("app.manager.ensure_active", check_then_the_owner_pauses)
     r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
-    _assert_refused(client, pid, r, refused_by, calls_before=1)
+    _assert_refused(client, pid, r, "model_call", calls_before=1)
     assert len(fake.requests) == 1
     assert client.get(f"/projects/{pid}/tasks").json() == tasks
     assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
 
 
+class _FailingProvider(FakeProvider):
+    def complete(self, request):
+        self.requests.append(request)
+        raise ProviderError("model timed out")
+
+
+@pytest.mark.parametrize("failure, status", [("budget", 402), ("provider_error", 502), ("invalid_plan", 422)])
+def test_a_failed_replan_keeps_the_plan(client, project, monkeypatch, failure, status):
+    """The rest of the unit: a re-plan refused for budget, failed by the provider or answered with an invalid
+    plan rejects nothing either — the gateway's own commits (its budget.exceeded event, its ModelCall row) carry
+    none of the rejection."""
+    pid = project["id"]
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
+    client.post(f"/projects/{pid}/plan")
+    tasks = client.get(f"/projects/{pid}/tasks").json()
+    if failure == "budget":
+        assert client.put(f"/settings/project/{pid}", json={"budget": {"project_usd": 0.000001}}).status_code == 200
+    replan = {"provider_error": _FailingProvider(), "invalid_plan": FakeProvider(replies=[{**PLAN, "steps": []}])}
+    use_real_gateway(client, monkeypatch, replan.get(failure, FakeProvider(replies=[PLAN])))
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == status, r.text
+    assert client.get(f"/projects/{pid}/tasks").json() == tasks
+    assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
+
+
+def test_a_pause_landing_mid_replan_keeps_the_paid_for_plan(client, session_factory, project, monkeypatch):
+    """d16: the re-plan already in flight keeps its result, and the rejection with it (its tasks are CREATED,
+    so nothing starts while paused)."""
+    pid = project["id"]
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
+    client.post(f"/projects/{pid}/plan")
+    old = {t["id"] for t in client.get(f"/projects/{pid}/tasks").json()}
+    revised = {**PLAN, "understanding": "Revised"}
+    use_real_gateway(client, monkeypatch, PausingProvider(session_factory, pid, [revised]))
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == 200 and r.json()["understanding"] == "Revised", r.text
+    assert client.get(f"/projects/{pid}").json()["paused"] is True
+    assert {t["status"] for t in client.get(f"/projects/{pid}/tasks").json()} == {"CREATED"}
+    rejected = [e for e in _events(client, pid) if e["type"] == "decision.plan_rejected"]
+    assert len(rejected) == 1 and set(rejected[0]["payload"]["deleted_task_ids"]) == old
+
+
 def test_reject_and_replan_land_together_through_the_real_gateway(client, project, monkeypatch):
-    """reject_plan leaves the commit to the re-plan; with the gateway on the route's own session (as in
-    production) the rejection and the new plan both land."""
+    """The rejection and the new plan land in one commit after the re-plan's call; with the gateway on the
+    route's own session (as in production) both land."""
     pid = project["id"]
     fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, {**PLAN, "understanding": "Revised"}]))
     client.post(f"/projects/{pid}/plan")
@@ -499,43 +531,29 @@ def test_pause_during_run_of_a_leaf_task_withholds_nothing(client, session_facto
     app.dependency_overrides.pop(get_gateway, None)
 
 
-@pytest.fixture
-def file_client(tmp_path):
-    """The app on a file-based SQLite database, like the default agent_factory.db, with production's session
-    options (autoflush decides what a session writes before a model call): each session gets its own
-    connection, so SQLite's database-wide write lock is real here (the other tests share one in-memory
-    connection, which can't show it). Yields the client and its session factory."""
-    engine = make_engine(f"sqlite:///{tmp_path / 'agent_factory.db'}")
-    assert isinstance(engine.pool, QueuePool)  # one connection per session, even within one thread
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(**{**SessionLocal.kw, "bind": engine})
-    with factory() as s:
-        sync_from_files(s)
-
-    def override():
-        with factory() as s:
-            yield s
-
-    app.dependency_overrides[get_session] = override
-    yield TestClient(app), factory
-    app.dependency_overrides.clear()
-    engine.dispose()
+def test_the_mid_flight_pause_check_lets_two_completions_queue_on_postgresql(session, project):
+    """PostgreSQL: _paused_now's lock is FOR NO KEY UPDATE, like the move commit guard (app/pause.py). It still
+    conflicts with the pause's UPDATE, but not with the KEY SHARE that a completion's flushed rows (events,
+    memory) take on the project row through their foreign keys; FOR UPDATE would, and two runs finishing in one
+    project could deadlock."""
+    statements = []
+    event.listen(session, "do_orm_execute", lambda state: statements.append(state.statement))
+    assert manager._paused_now(session, session.get(Project, project["id"])) is False
+    assert str(statements[-1].compile(dialect=postgresql.dialect())).endswith("FOR NO KEY UPDATE")
 
 
 @MODEL_CALL_PATHS
+@pytest.mark.parametrize("db_engine", ["file"], indirect=True)
 def test_a_pause_commits_while_a_model_call_is_in_flight_on_file_sqlite(
-    file_client, monkeypatch, path, setup, body, reply
+    client, session_factory, project, monkeypatch, path, setup, body, reply
 ):
     """The reported bug: chat flushed the owner's message before its model call, and on SQLite that open write
     transaction held the database-wide write lock for the whole call, so the owner's pause (or any write) waited
     out the 5 s busy timeout and failed with "database is locked" (500). No model-call path may hold a write
-    transaction while the provider runs, plan/reject's staged rejection included: the pause, on its own
-    connection, commits mid-call."""
-    client, factory = file_client
-    user = client.post("/users", json={"email": "f@example.com"}).json()
-    pid = client.post("/projects", json={"owner_id": user["id"], "title": "P", "goal": "g"}).json()["id"]
+    transaction while the provider runs: the pause, on its own connection, commits mid-call."""
+    pid = project["id"]
     tid = setup(client, pid)["id"] if setup else None
-    use_real_gateway(client, monkeypatch, PausingProvider(factory, pid, [reply]))
+    use_real_gateway(client, monkeypatch, PausingProvider(session_factory, pid, [reply]))
 
     r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json=body)
     assert r.status_code == 200, r.text  # the call already in flight keeps its paid-for result (d16)
