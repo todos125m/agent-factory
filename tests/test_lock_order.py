@@ -3,7 +3,8 @@ would otherwise deadlock one that wrote its task rows first (a reject deleting a
 project row and then wants those rows (a completion promoting that task): a 500, and a paid result rolled back.
 SQLite can't show a deadlock, but the order of the statements is the same there, so it is pinned from the SQL a
 request emits (a read that locks is tagged: SQLite renders no lock clause, and an unlocked read of `paused` has
-the same text); the lock mode is pinned compiled for PostgreSQL. FakeProvider only.
+the same text); the lock mode is pinned compiled for PostgreSQL. A task a model call is about to move is read again
+under the project lock, and only then written (app/pause.py::lock_task). FakeProvider only.
 """
 
 from contextlib import contextmanager
@@ -17,7 +18,8 @@ from app.gateway.providers import FakeProvider
 from app.models import Project, Task
 from tests.test_budget_holds import _call
 from tests.test_manager import CHECKPOINT, _ready_task
-from tests.test_project_pause import _running_task, use_real_gateway
+from tests.test_project_pause import ActsDuringCall, _running_task, use_real_gateway
+from tests.test_task_changed_during_call import S, _moves
 from tests.test_task_run import PLAN, RUN_RESULT
 
 LOCK = "LOCKING SELECT projects.paused FROM projects WHERE projects.id = ?"
@@ -45,16 +47,35 @@ def _is_write(sql):
     return sql.startswith(("INSERT", "UPDATE", "DELETE"))
 
 
+def _past_the_calls_log(log):
+    """Where the request's own work resumes: after the gateway's log of its model call (that call's ModelCall row,
+    then its hold's release)."""
+    logged = next(i for i, sql in enumerate(log) if sql.startswith("INSERT INTO model_calls"))
+    return 1 + next(i for i in range(logged, len(log)) if log[i].startswith("DELETE FROM budget_holds"))
+
+
 def _first_write_follows_the_lock(log, *, after_a_model_call=True):
-    """The first write of the request, past the gateway's own log of its model call (that call's ModelCall row, then
-    its hold's release), comes straight after a locking read of `paused`: nothing was written before the project
-    row was locked."""
-    start = 0
-    if after_a_model_call:
-        logged = next(i for i, sql in enumerate(log) if sql.startswith("INSERT INTO model_calls"))
-        start = 1 + next(i for i in range(logged, len(log)) if log[i].startswith("DELETE FROM budget_holds"))
+    """The first write of the request, past the gateway's own log of its model call, comes straight after a locking
+    read of `paused`: nothing was written before the project row was locked."""
+    start = _past_the_calls_log(log) if after_a_model_call else 0
     first_write = next(i for i in range(start, len(log)) if _is_write(log[i]))
     assert log[first_write - 1] == LOCK, log[max(start - 1, 0):first_write + 1]
+
+
+def _the_task_is_read_again_under_the_lock(log):
+    """Past the model call the project row is locked and what the request staged is flushed, and only then is the
+    task row locked and read again (straight after the lock's own read of `paused`, which follows that flush): a move
+    made during the call is seen before the task is changed, SQLite holds its write lock by then (the flush), and on
+    PostgreSQL a transition that takes no project lock (a cancel) waits for the commit instead of landing between this
+    read and the write. Returns the log from the re-read on."""
+    start = _past_the_calls_log(log)
+    _first_write_follows_the_lock(log)
+    first_write = next(i for i in range(start, len(log)) if _is_write(log[i]))
+    reread = next(i for i in range(start, len(log)) if log[i].startswith("LOCKING SELECT tasks."))
+    assert first_write < reread and log[reread - 1] == LOCK, log[start:reread + 1]
+    written = [sql for sql in log[start:reread] if sql.startswith("UPDATE tasks")]
+    assert not written, "the task was written before it was read again"
+    return log[reread + 1:]
 
 
 @pytest.mark.parametrize("locker", [
@@ -152,3 +173,73 @@ def test_a_transition_to_ready_locks_before_it_moves_the_task(client, session_fa
         r = client.post(f"/projects/{pid}/tasks/{t['id']}/transition", json={"status": "READY"})
     assert r.status_code == 200, r.text
     _first_write_follows_the_lock(log, after_a_model_call=False)
+
+
+# ---------- a task a model call is about to move is read again under the lock, and only then written ----------
+
+
+def test_a_completion_reads_its_task_again_under_the_lock_before_it_writes_it(
+    client, session_factory, project, monkeypatch
+):
+    pid = project["id"]
+    t = _running_task(client, pid)
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[RUN_RESULT]))
+    with sql_log(session_factory.kw["bind"]) as log:
+        assert client.post(f"/projects/{pid}/tasks/{t['id']}/run").status_code == 200
+    after = _the_task_is_read_again_under_the_lock(log)
+    assert any(sql.startswith("UPDATE tasks") for sql in after), after  # the completion, written after the re-read
+
+
+def test_an_automatic_decision_reads_its_task_again_under_the_lock_before_it_writes_it(
+    client, session_factory, project, monkeypatch
+):
+    pid = project["id"]
+    t = _ready_task(client, pid, risk="low")
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[CHECKPOINT]))
+    with sql_log(session_factory.kw["bind"]) as log:
+        r = client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint")
+    assert r.status_code == 200 and r.json()["auto_decided"] is True, r.text
+    after = _the_task_is_read_again_under_the_lock(log)
+    assert any(sql.startswith("UPDATE tasks") for sql in after), after  # the decision, written after the re-read
+
+
+def test_a_run_refused_for_a_moved_task_writes_nothing_but_its_record(client, session_factory, project, monkeypatch):
+    """The staged result is rolled back with the locks; the only write after the re-read is the event that says why."""
+    pid = project["id"]
+    t = _running_task(client, pid)
+    use_real_gateway(
+        client, monkeypatch,
+        ActsDuringCall([RUN_RESULT], lambda: _moves(session_factory, pid, t["id"], S.FAILED)),
+    )
+    with sql_log(session_factory.kw["bind"]) as log:
+        assert client.post(f"/projects/{pid}/tasks/{t['id']}/run").status_code == 409
+    after = _the_task_is_read_again_under_the_lock(log)
+    assert len(after) == 1 and after[0].startswith("INSERT INTO run_events"), after
+
+
+def test_a_withheld_decision_writes_nothing_but_its_record_after_the_re_read(
+    client, session_factory, project, monkeypatch
+):
+    pid = project["id"]
+    t = _ready_task(client, pid, risk="low")
+    use_real_gateway(
+        client, monkeypatch,
+        ActsDuringCall([CHECKPOINT], lambda: _moves(session_factory, pid, t["id"], S.CANCELLED)),
+    )
+    with sql_log(session_factory.kw["bind"]) as log:
+        r = client.post(f"/projects/{pid}/tasks/{t['id']}/checkpoint")
+    assert r.status_code == 200 and r.json()["auto_decided"] is False, r.text
+    after = _the_task_is_read_again_under_the_lock(log)
+    assert len(after) == 1 and after[0].startswith("INSERT INTO run_events"), after
+
+
+def test_the_task_is_locked_for_no_key_update_on_postgresql(client, session, project):
+    """FOR NO KEY UPDATE, like the project row's lock: it makes a transition that takes no project lock wait for the
+    caller's commit, but not the child rows the caller writes (their KEY SHARE), which FOR UPDATE would block."""
+    t = client.post(f"/projects/{project['id']}/tasks", json={"title": "T"}).json()
+    statements = []
+    event.listen(session, "do_orm_execute", lambda state: statements.append(state.statement))
+
+    assert pause.lock_task(session, t["id"]) is not None
+    sql = str(statements[-1].compile(dialect=postgresql.dialect()))
+    assert "FROM tasks" in sql and sql.endswith("FOR NO KEY UPDATE"), sql

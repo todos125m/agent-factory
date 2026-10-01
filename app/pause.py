@@ -10,6 +10,9 @@ The project row is the per-project queue for everything that must not interleave
 a completion's check, a plan decision, a paid call's budget reservation (app/gateway/service.py). They all lock
 it the same way (_paused with lock=True); tests/test_pause_task_moves.py and tests/test_budget_holds.py pin the
 PostgreSQL SQL.
+
+A task read before a model call is stale after it, pause or not: work past a call that will move the task reads it
+again under the project lock (lock_task) and moves it only if it is still as the call found it.
 """
 
 from typing import Any
@@ -46,6 +49,24 @@ def lock_project(session: Session, project_id: int) -> bool:
     """Lock the project row, flush the caller's work (see _paused) and return `paused`, for work that is past
     its entry check and must not interleave with a pause or another locker until the caller commits."""
     return _paused(session, project_id, lock=True)
+
+
+def lock_task(session: Session, task_id: int) -> Task | None:
+    """The task as it is now, locked, for work past a model call that is about to move it. The session expires
+    nothing on commit, so a Task the request loaded before the call still holds what it held then, whatever the owner
+    (or the owner's other device) did to the task during the call, which takes seconds to a minute: this reads the row
+    again into that same instance and returns it, or None if the task is gone. Nothing may be changed on the instance
+    before this (a re-read discards it), and the project row is locked first (lock_project), like every locker.
+
+    The lock is FOR NO KEY UPDATE, taken after the project row's: a transition to a status that starts nothing
+    (cancel, fail, hold) takes no project lock, so on PostgreSQL only this row lock makes it wait for the caller's
+    commit instead of landing between this read and the caller's write, which would overwrite it. It conflicts with
+    that transition's UPDATE, not with the KEY SHARE of the child rows the caller writes. SQLite renders no lock: its
+    write lock is the flush of what the caller staged before lock_project, so stage something first."""
+    return session.scalars(
+        select(Task).where(Task.id == task_id).with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    ).one_or_none()
 
 
 def _refuse(session: Session, project_id: int, action: str, task_id: int | None, **detail: Any) -> None:

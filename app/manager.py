@@ -13,7 +13,7 @@ from app import context, memory, settings_layers, sources, storable
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
-from app.pause import check_task_move, commit_unless_paused, lock_project, refuse_if_paused
+from app.pause import check_task_move, commit_unless_paused, lock_project, lock_task, refuse_if_paused
 from app.state_machine import TransitionError
 
 
@@ -38,6 +38,27 @@ def _paused_now(session: Session, project: Project) -> bool:
 
 # The columns a plan step's text lands in (a step becomes a Task): the step's own limits, from the columns themselves.
 _STEP_LIMITS = {"title": storable.limit(Task, "title"), "agent": storable.limit(Task, "owner")}
+
+
+def _stamp(task: Task) -> tuple[TaskStatus, int]:
+    """What a model call starts from: the task's status and retry count. The task read again once the call is over
+    (app/pause.py::lock_task) is still the one the call belongs to only if this is unchanged; the retry count is there
+    because a task failed, retried and started again is RUNNING once more, but not for this call."""
+    return task.status, task.retries
+
+
+def _record_moved_meanwhile(
+    session: Session, project_id: int, task_id: int, action: str, was: TaskStatus, now: TaskStatus | None
+) -> str:
+    """Record that the move `action` was not made because the task is no longer as the model call found it: `was` is
+    what the call found, `now` the status of the task read again (None: it is gone, so the event is the project's).
+    Returns `now` as the event records it."""
+    text = "deleted" if now is None else now.value
+    record_event(
+        session, project_id, "task.changed_meanwhile", None if now is None else task_id,
+        action=action, was=was.value, now=text,
+    )
+    return text
 
 
 class PlanStepIn(BaseModel):
@@ -320,7 +341,13 @@ def reject_plan(session: Session, gateway: Gateway, project: Project, feedback: 
 
 
 def create_checkpoint(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
+    """Ask the manager for the task's decision checkpoint and, in automatic mode, take it when the risk's rule allows.
+
+    The model call takes seconds to a minute, and the Task loaded before it is stale after it: the auto-decision is
+    taken only if the task, read again under the project lock, is still as the call found it. Otherwise (paused, or
+    cancelled, decided or put on hold meanwhile) the paid-for checkpoint is kept and the decision is withheld."""
     ensure_active(session, project, "checkpoint", task.id)
+    started_from = _stamp(task)
     system = context.system_prompt(session, manager_agent(session), ["decision-checkpoint", "evidence"])
     user = context.task_context(session, task)
     response = gateway.call(
@@ -340,10 +367,20 @@ def create_checkpoint(session: Session, gateway: Gateway, project: Project, task
     rule = approvals.get(task.risk.value) if isinstance(approvals, dict) else None
     # Allowlist, not `!= "user"`: an unknown or malformed rule (e.g. a stored typo) waits for the owner.
     auto = settings["mode"] == "automatic" and rule in ("auto", "manager")
-    if auto and _paused_now(session, project):
-        # Paused while the model call ran: keep the paid-for checkpoint, leave the decision to the owner.
-        record_event(session, project.id, "pause.withheld", task.id, action="auto_decide")
-        auto = False
+    if auto:
+        # The project row is locked before the checkpoint above is flushed, the task row after it (app/pause.py).
+        if _paused_now(session, project):
+            # Paused while the model call ran: keep the paid-for checkpoint, leave the decision to the owner.
+            record_event(session, project.id, "pause.withheld", task.id, action="auto_decide")
+            auto = False
+        else:
+            fresh = lock_task(session, task.id)
+            if fresh is None or _stamp(fresh) != started_from:
+                # Moved on while the call ran (cancelled, decided from another tab, put on hold): the decision was
+                # meant for the task the call found, so it is withheld too, and the owner decides.
+                now = None if fresh is None else fresh.status
+                _record_moved_meanwhile(session, project.id, task.id, "auto_decide", started_from[0], now)
+                auto = False
     if auto:
         _decide(session, task, checkpoint.recommended, None, auto=True)
     session.commit()
@@ -401,12 +438,18 @@ def release_withheld(session: Session, project: Project) -> list[int]:
 
 
 def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -> dict[str, Any]:
-    """Execute a RUNNING task with its owner agent: one Gateway.call, deterministic result handling."""
+    """Execute a RUNNING task with its owner agent: one Gateway.call, deterministic result handling.
+
+    The call takes seconds to a minute, and the Task loaded before it is stale after it: the owner may have failed or
+    held the task meanwhile, or the same task may have been run from another device and completed. The result is taken
+    only if the task, read again under the project lock, is still as the call found it (RUNNING). Otherwise the run is
+    refused (409) and nothing of its result is kept: the paid call stays logged (its ModelCall row), nothing else."""
     ensure_active(session, project, "run", task.id)
     if task.status is not TaskStatus.RUNNING:
         raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
     check_task_move(session, task, TaskStatus.COMPLETED, dependency_statuses=[])
     previous = task.status
+    started_from = _stamp(task)
 
     if not task.owner:
         raise ManagerError("task has no owner agent")
@@ -428,16 +471,31 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
         raise ManagerError(f"invalid task output: {e}") from e
     result = _apply_evidence_guard(session, project.id, task, result)
 
-    task.output = result.model_dump()
-    task.status = TaskStatus.COMPLETED
+    # The result is staged first and the task itself is not touched yet: the lock below flushes what is staged (the
+    # write lock on SQLite) and the task is read again under it, so what happened to it during the call is seen before
+    # it is changed. If it moved on, rolling back drops the staged result with the locks.
     record_event(session, project.id, "task.status_changed", task.id,
                  **{"from": previous.value, "to": "COMPLETED", "reason": "task executed"})
     record_event(session, project.id, "task.completed", task.id, **result.model_dump())
     memory.capture_from_task_output(session, project, task, agent.name, result, mode=task_settings["mode"])
 
-    # Locks the project row before flushing the result (see app/pause.py::_paused), and the flush is what lets
-    # the dependents' status query below see this task's new COMPLETED status.
-    if _paused_now(session, project):
+    # Locks the project row before flushing the result (see app/pause.py::_paused), then locks the task row.
+    paused = _paused_now(session, project)
+    fresh = lock_task(session, task.id)
+    if fresh is None or _stamp(fresh) != started_from:
+        project_id, task_id = project.id, task.id  # read before the rollback expires them
+        now = None if fresh is None else fresh.status
+        session.rollback()
+        text = _record_moved_meanwhile(session, project_id, task_id, "run", started_from[0], now)
+        session.commit()
+        raise TransitionError(
+            f"The task changed while its model call ran (it is now {text}); this run's result was not applied"
+        )
+    check_task_move(session, task, TaskStatus.COMPLETED, dependency_statuses=[])  # the rules, on the fresh status
+    task.output = result.model_dump()
+    task.status = TaskStatus.COMPLETED
+    session.flush()  # what lets the dependents' status query below see this task's new COMPLETED status
+    if paused:
         # Paused while the model call ran: keep the paid-for result; release_withheld promotes on resume.
         if _created_dependents(session, project, task):
             record_event(session, project.id, "pause.withheld", task.id, action="promote_dependents")
