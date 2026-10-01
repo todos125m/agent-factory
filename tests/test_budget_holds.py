@@ -302,6 +302,41 @@ def test_deleting_a_task_does_not_take_its_hold_with_it():
     assert fk.ondelete == "SET NULL"
 
 
+@FILE
+def test_a_task_deleted_while_its_call_ran_does_not_lose_the_calls_record(session_factory):
+    """A rejected plan's task can be deleted while a call on it (the chat's checkpoint suggestion) is in flight.
+    PostgreSQL enforces model_calls.task_id, so the log would fail and what the call cost would vanish; it is
+    logged on the project instead. (SQLite enforces foreign keys only when asked, as here.)"""
+    engine = session_factory.kw["bind"]
+
+    def foreign_keys_on(dbapi_connection, record, proxy):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    event.listen(engine, "checkout", foreign_keys_on)
+    with session_factory() as s:
+        pid = make_project(s).id
+        task = Task(project_id=pid, title="T")
+        s.add(task)
+        s.commit()
+        tid = task.id
+
+    class DeletesTheTask(FakeProvider):
+        def complete(self, request):
+            with session_factory() as other:  # the owner rejects the plan this task belongs to
+                other.execute(delete(Task).where(Task.id == tid))
+                other.commit()
+            return super().complete(request)
+
+    with session_factory() as s:
+        _call(s, DeletesTheTask(), pid, tid)
+    with session_factory() as s:
+        (call,) = s.query(ModelCall).all()
+        assert (call.project_id, call.task_id, call.ok) == (pid, None, True)
+        assert s.query(BudgetHold).count() == 0
+
+
 def test_a_hold_left_by_a_stopped_process_stops_counting(session):
     pid = make_project(session, budget=1.5 * ESTIMATE).id
     session.add(BudgetHold(project_id=pid, usd=ESTIMATE, created_at=utcnow() - HOLD_TTL - timedelta(minutes=1)))

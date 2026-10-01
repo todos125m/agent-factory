@@ -10,6 +10,7 @@ from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import settings_layers, storable
@@ -160,11 +161,21 @@ class Gateway:
         return response
 
     def _log(self, call: ModelCall, hold_id: int | None) -> None:
-        """Log the call; its ModelCall row replaces its budget hold in one commit. If that commit fails, the hold
-        is released on its own, so a call that finished stops counting at once, not after HOLD_TTL."""
+        """Log the call; its ModelCall row replaces its budget hold in one commit.
+
+        The ModelCall goes in first: its foreign keys take their shared locks on the task before the hold row is
+        touched, the order a delete of that task (a rejected plan's) takes them in (the task, then the hold its
+        SET NULL updates), so the two can't deadlock on PostgreSQL. A task deleted while the call ran is no reason
+        to lose the record of what it cost: it is logged on the project instead. If the commit fails, the hold is
+        released on its own, so a call that finished stops counting at once, not after HOLD_TTL."""
         try:
+            try:
+                self._insert(call)
+            except IntegrityError:  # its task was deleted meanwhile (the project's own deletion fails again, below)
+                self.session.rollback()
+                call.task_id = None
+                self._insert(call)
             self._drop_hold(hold_id)
-            self.session.add(call)
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -174,6 +185,10 @@ class Gateway:
             except Exception:  # the failure being raised is the one that matters; HOLD_TTL covers this one
                 self.session.rollback()
             raise
+
+    def _insert(self, call: ModelCall) -> None:
+        self.session.add(call)
+        self.session.flush()
 
     def _drop_hold(self, hold_id: int | None) -> None:
         if hold_id is not None:
@@ -185,9 +200,9 @@ class Gateway:
     ) -> int | None:
         """Check this call's estimated worst case against its budgets, counting the paid calls still in flight,
         and hold it while the call runs so the next check counts it too (§31). Checks in one project queue: the
-        hold is written first, then the project row is locked (app/pause.py::refuse_if_paused with lock: on
-        SQLite that write takes the write lock, on PostgreSQL FOR NO KEY UPDATE does), and `paused` is read under
-        the lock, so a pause that queued ahead of this check has landed by now and refuses the call. On a refusal
+        project row is locked first and then the hold is written (app/pause.py::refuse_if_paused with lock: on
+        PostgreSQL FOR NO KEY UPDATE, on SQLite the hold's write takes the write lock), and `paused` is read under
+        both, so a pause that queued ahead of this check has landed by now and refuses the call. On a refusal
         nothing is held (a pause refusal rolls the hold back, a budget refusal deletes it) and it is recorded."""
         if project_id is None and task_id is None:
             return None  # no budget to check against: the benchmark caps its own spend

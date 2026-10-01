@@ -31,9 +31,9 @@ def _paused(session: Session, project_id: int, *, lock: bool = False) -> bool:
     PostgreSQL's row locks would otherwise deadlock one that wrote its task rows first (a reject deleting a task)
     against one that holds the project row and then wants those rows (a completion promoting that task). The lock
     is FOR NO KEY UPDATE: it conflicts with the pause's UPDATE and with the other lockers, but not with the KEY
-    SHARE that foreign keys to the project take (a flushed event's, say), where FOR UPDATE could deadlock two
-    completions in one project. SQLite renders no lock: its one write lock is taken by the flush, and the read
-    after the flush is the one that counts."""
+    SHARE that every insert of a child row of the project takes (a paid call's model_calls row, say), which FOR
+    UPDATE would block for as long as the lock is held. SQLite renders no lock: its one write lock is taken by
+    the flush, and the read after the flush is the one that counts."""
     query = select(Project.paused).where(Project.id == project_id)
     if lock:
         query = query.with_for_update(key_share=True)
