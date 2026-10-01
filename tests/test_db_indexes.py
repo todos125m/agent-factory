@@ -4,9 +4,12 @@ call ever logged. `create_all` only creates the indexes of the tables it creates
 was declared get it from app/db.py::ensure_indexes at startup.
 """
 
+from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
+from sqlalchemy.orm import sessionmaker
 
 from app.db import Base, ensure_indexes, make_engine
+from app.main import app
 
 BUDGET_INDEXES = {
     "ix_model_calls_project_id", "ix_model_calls_task_id", "ix_budget_holds_project_id", "ix_budget_holds_task_id",
@@ -42,5 +45,20 @@ def test_ensure_indexes_adds_what_create_all_leaves_out_of_an_existing_table(tmp
     ensure_indexes(engine)
     assert BUDGET_INDEXES <= _indexes(engine)
     ensure_indexes(engine)  # idempotent
+    assert BUDGET_INDEXES <= _indexes(engine)
+    engine.dispose()
+
+
+def test_startup_adds_the_missing_indexes_to_an_existing_database(tmp_path, monkeypatch):
+    """The lifespan (not only ensure_indexes) does it: an upgraded database must not stay without them."""
+    engine = make_engine(f"sqlite:///{tmp_path / 'agent_factory.db'}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as c:
+        c.execute(text("DROP INDEX ix_model_calls_project_id"))
+    monkeypatch.setattr("app.main.engine", engine)  # the lifespan runs on this database, not the real file
+    monkeypatch.setattr("app.main.SessionLocal", sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
+
+    with TestClient(app):
+        pass
     assert BUDGET_INDEXES <= _indexes(engine)
     engine.dispose()

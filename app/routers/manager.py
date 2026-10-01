@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app import chat, manager
+from app import chat, manager, storable
 from app.db import get_session
 from app.gateway.providers import ProviderError
 from app.gateway.service import BudgetExceeded, Gateway
@@ -30,8 +30,8 @@ def _run(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         raise HTTPException(422, str(e)) from e
     except BudgetExceeded as e:
         raise HTTPException(402, str(e)) from e
-    except ProviderError as e:
-        raise HTTPException(502, str(e)) from e
+    except ProviderError as e:  # its text can quote a model's: JSON can't carry a lone surrogate
+        raise HTTPException(502, storable.clean(str(e))) from e
     except (TransitionError, ProjectPaused) as e:  # every route here is refused while paused
         raise HTTPException(409, str(e)) from e
 

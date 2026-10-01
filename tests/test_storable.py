@@ -8,10 +8,10 @@ import json
 import pytest
 
 from app import storable
-from app.gateway.providers import FakeProvider
+from app.gateway.providers import FakeProvider, ProviderError
 from app.manager import PlanIn
 from tests.test_manager import CHECKPOINT, _ready_task
-from tests.test_project_pause import _events, _model_calls, _running_task, use_real_gateway
+from tests.test_project_pause import ROUTE, _events, _model_calls, _running_task, use_provider, use_real_gateway
 from tests.test_task_run import PLAN, RUN_RESULT
 
 # NUL: PostgreSQL text can't hold one. A lone surrogate: not UTF-8, so no database encodes it.
@@ -84,3 +84,27 @@ def test_a_task_result_the_database_cannot_store_is_invalid(client, project, mon
     assert task["status"] == "RUNNING" and task["output"] is None
     assert client.get(f"/projects/{pid}/memory").json() == []
     assert _model_calls(client, pid) == 1
+
+
+class Quoting(FakeProvider):
+    """A provider whose error quotes a model's reply, as the OpenAI and Ollama invalid-JSON errors do."""
+
+    def complete(self, request):
+        raise ProviderError("not JSON: ok \ud83d \x00 end")
+
+
+def test_a_provider_error_quoting_unstorable_text_is_still_a_502(client, project, monkeypatch):
+    """The response detail is JSON, which can't carry a lone surrogate: it would be a 500 instead."""
+    use_real_gateway(client, monkeypatch, Quoting())
+
+    r = client.post(f"/projects/{project['id']}/plan")
+    assert r.status_code == 502 and r.json()["detail"] == "not JSON: ok ?  end"
+
+
+def test_a_benchmark_route_whose_error_quotes_unstorable_text_is_still_recorded(client, session_factory):
+    """One route's failure must not abort the batch, and its error is stored in the benchmark's own table too."""
+    use_provider(client, session_factory, Quoting())
+
+    r = client.post("/benchmarks/run", json={"routes": [ROUTE, ROUTE]})
+    assert r.status_code == 200, r.text
+    assert [run["error"] for run in r.json()] == ["not JSON: ok ?  end"] * 2

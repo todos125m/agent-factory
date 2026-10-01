@@ -239,8 +239,8 @@ def test_the_reservation_locks_the_project_row_for_no_key_update_on_postgresql(s
 
     _call(session, FakeProvider(), pid)
     compiled = [str(st.compile(dialect=postgresql.dialect())) for st in statements]
-    locks = [sql for sql in compiled if " FOR " in sql]
-    assert len(locks) == 1 and "FROM projects" in locks[0] and locks[0].endswith("FOR NO KEY UPDATE")
+    locks = [sql for sql in compiled if " FOR " in sql]  # before the hold is written, and again after
+    assert locks and all("FROM projects" in sql and sql.endswith("FOR NO KEY UPDATE") for sql in locks)
 
 
 def test_a_failed_call_releases_its_hold(session):

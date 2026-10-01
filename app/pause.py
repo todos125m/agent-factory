@@ -25,19 +25,25 @@ from app.state_machine import START_STATUSES, ProjectPaused, check_project_activ
 def _paused(session: Session, project_id: int, *, lock: bool = False) -> bool:
     """`paused` read fresh, not from a Project the caller loaded: the owner's pause commits in another
     session. What this session has flushed counts, so a resume flushed before its promotions reads active.
-    `lock` flushes the caller's work first and locks the row, so a pause can't land between this read and the
-    caller's commit (SQLite: the flush takes the write lock; PostgreSQL: FOR NO KEY UPDATE, which conflicts
-    with the pause's UPDATE but not with the KEY SHARE locks the flushed rows' foreign keys take on the project
-    row, so two moves in one project queue instead of deadlocking)."""
+
+    `lock` locks the project row, flushes the caller's work and reads under both, so a pause can't land between
+    this read and the caller's commit. Every locker takes the project row before any other row it writes:
+    PostgreSQL's row locks would otherwise deadlock one that wrote its task rows first (a reject deleting a task)
+    against one that holds the project row and then wants those rows (a completion promoting that task). The lock
+    is FOR NO KEY UPDATE: it conflicts with the pause's UPDATE and with the other lockers, but not with the KEY
+    SHARE that foreign keys to the project take (a flushed event's, say), where FOR UPDATE could deadlock two
+    completions in one project. SQLite renders no lock: its one write lock is taken by the flush, and the read
+    after the flush is the one that counts."""
     query = select(Project.paused).where(Project.id == project_id)
     if lock:
-        session.flush()
         query = query.with_for_update(key_share=True)
+        session.scalar(query)  # PostgreSQL: the row lock, before this session writes any row
+        session.flush()  # SQLite: the write lock
     return bool(session.scalar(query))  # no such project: not paused
 
 
 def lock_project(session: Session, project_id: int) -> bool:
-    """Flush the caller's work, lock the project row (see _paused) and return `paused`, for work that is past
+    """Lock the project row, flush the caller's work (see _paused) and return `paused`, for work that is past
     its entry check and must not interleave with a pause or another locker until the caller commits."""
     return _paused(session, project_id, lock=True)
 

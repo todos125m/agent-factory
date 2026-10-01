@@ -11,7 +11,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import context
+from app import context, storable
 from app.gateway.service import Gateway
 from app.manager import PlanIn, manager_agent
 from app.models import BenchmarkRun
@@ -50,7 +50,7 @@ def run_one(session: Session, gateway: Gateway, route: RouteIn) -> BenchmarkRun:
             route={"provider": route.provider, "model": route.model, "effort": route.effort},
         )
     except Exception as e:  # noqa: BLE001 - one route's failure (any provider/SDK error) must not abort the rest
-        run.error = str(e)[:500]
+        run.error = storable.clean(str(e))[:500]  # a provider's error can quote a model's text
         session.add(run)
         session.commit()
         return run

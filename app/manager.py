@@ -30,9 +30,9 @@ def ensure_active(session: Session, project: Project, action: str, task_id: int 
 
 def _paused_now(session: Session, project: Project) -> bool:
     """Fresh read of `paused` for work already past `ensure_active`: the owner may have paused while its
-    model call ran, and loaded objects are never expired here. Flushing first and reading under the project
-    row lock (app/pause.py::lock_project) keep a pause from landing between this check and the caller's
-    commit; the lock mode is what lets two completions in one project queue instead of deadlocking."""
+    model call ran, and loaded objects are never expired here. Locking the project row (app/pause.py::lock_project),
+    then flushing and reading, keeps a pause from landing between this check and the caller's commit; the lock
+    mode and order are what let two completions in one project queue instead of deadlocking."""
     return lock_project(session, project.id)
 
 
@@ -430,8 +430,9 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
                  **{"from": previous.value, "to": "COMPLETED", "reason": "task executed"})
     record_event(session, project.id, "task.completed", task.id, **result.model_dump())
     memory.capture_from_task_output(session, project, task, agent.name, result, mode=task_settings["mode"])
-    session.flush()  # dependents' status query below must see this task's new COMPLETED status
 
+    # Locks the project row before flushing the result (see app/pause.py::_paused), and the flush is what lets
+    # the dependents' status query below see this task's new COMPLETED status.
     if _paused_now(session, project):
         # Paused while the model call ran: keep the paid-for result; release_withheld promotes on resume.
         if _created_dependents(session, project, task):
