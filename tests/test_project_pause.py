@@ -7,12 +7,17 @@ project's model call itself too, for a path that skips the manager's check. Fake
 """
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 
 from app import manager
+from app.db import Base, get_session, make_engine
 from app.gateway.providers import FakeProvider
 from app.gateway.service import Gateway
 from app.main import app
 from app.models import ModelCall, Project, Task
+from app.registry import sync_from_files
 from app.routers.manager import get_gateway
 from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
@@ -311,7 +316,7 @@ def test_a_path_that_skips_ensure_active_is_still_refused(client, project, monke
     _assert_refused(client, pid, r, "model_call", tid)
     assert fake.requests == []
     assert client.get(f"/projects/{pid}/tasks").json() == tasks
-    assert client.get(f"/projects/{pid}/chat").json() == []  # chat's already-flushed message is dropped too
+    assert client.get(f"/projects/{pid}/chat").json() == []  # chat stores the owner's message only with a reply (d19)
 
 
 def test_a_route_that_does_not_map_the_refusal_still_answers_409(client, project, monkeypatch):
@@ -485,3 +490,51 @@ def test_pause_during_run_of_a_leaf_task_withholds_nothing(client, session_facto
     assert r.status_code == 200 and r.json()["task"]["status"] == "COMPLETED"
     assert "pause.withheld" not in {e["type"] for e in _events(client, pid)}
     app.dependency_overrides.pop(get_gateway, None)
+
+
+@pytest.fixture
+def file_client(tmp_path):
+    """The app on a file-based SQLite database, like the default agent_factory.db: each session gets its own
+    connection, so SQLite's database-wide write lock is real here (the other tests share one in-memory
+    connection, which can't show it). Yields the client and its session factory."""
+    engine = make_engine(f"sqlite:///{tmp_path / 'agent_factory.db'}")
+    assert isinstance(engine.pool, QueuePool)  # one connection per session, even within one thread
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with factory() as s:
+        sync_from_files(s)
+
+    def override():
+        with factory() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = override
+    yield TestClient(app), factory
+    app.dependency_overrides.clear()
+    engine.dispose()
+
+
+@pytest.mark.parametrize("path, setup, reply", [
+    ("chat", None, CHAT_REPLY),
+    ("plan", None, PLAN),
+    ("tasks/{tid}/checkpoint", _ready_task, CHECKPOINT),
+    ("tasks/{tid}/run", _running_task, RUN_RESULT),
+], ids=["chat", "plan", "checkpoint", "run"])
+def test_a_pause_commits_while_a_model_call_is_in_flight_on_file_sqlite(file_client, monkeypatch, path, setup, reply):
+    """The reported bug: chat flushed the owner's message before its model call, and on SQLite that open write
+    transaction held the database-wide write lock for the whole call, so the owner's pause (or any write) waited
+    out the 5 s busy timeout and failed with "database is locked" (500). No model-call path may hold a write
+    transaction while the provider runs: the pause, on its own connection, commits mid-call."""
+    client, factory = file_client
+    user = client.post("/users", json={"email": "f@example.com"}).json()
+    pid = client.post("/projects", json={"owner_id": user["id"], "title": "P", "goal": "g"}).json()["id"]
+    tid = setup(client, pid)["id"] if setup else None
+    use_real_gateway(client, monkeypatch, PausingProvider(factory, pid, [reply]))
+
+    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json={"text": "status?"} if path == "chat" else None)
+    assert r.status_code == 200, r.text  # the call already in flight keeps its paid-for result (d16)
+    assert client.get(f"/projects/{pid}").json()["paused"] is True
+    assert "project.paused" in {e["type"] for e in _events(client, pid)}
+    assert _model_calls(client, pid) == 1
+    if path == "chat":  # stored after the reply, the owner's message with it (d19)
+        assert [m["role"] for m in client.get(f"/projects/{pid}/chat").json()] == ["user", "manager"]

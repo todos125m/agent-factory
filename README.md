@@ -88,7 +88,7 @@ approval rule is `auto` or `manager`; any other value waits for the owner.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/projects/{id}/chat` | Owner ↔ manager chat: one `Gateway.call` (goal + compact task list + last 8 messages) → `{reply, suggested_action}`; the UI only ever shows a button for the suggested action, never auto-executes it |
+| POST | `/projects/{id}/chat` | Owner ↔ manager chat: one `Gateway.call` (goal + compact task list + last 8 messages) → `{reply, suggested_action}`; the UI only ever shows a button for the suggested action, never auto-executes it. The owner's message is stored only together with the reply, after the call (owner decision d19): a refused or failed turn (409/402/502/422) adds nothing to the chat, and nothing is written while the model runs (on SQLite that would hold the database-wide write lock and fail the owner's pause) |
 | GET  | `/projects/{id}/chat` | Chat history for the project |
 | GET  | `/inbox` | Everything waiting on the owner across every project — plans awaiting approval, checkpoints awaiting a decision, and `READY` tasks with no checkpoint yet (kind `ready`; the panel's one-tap «شروع» requests the task's checkpoint). A paused project lists nothing until it is resumed (owner decision d17); its own page still shows its plan and tasks — derived from existing events, nothing new stored |
 | POST | `/feedback` | Owner feedback (👍/👎 + optional note) on an agent's output — plan, checkpoint or chat reply |

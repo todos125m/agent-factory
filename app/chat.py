@@ -1,6 +1,12 @@
 """Owner <-> manager chat, per project. One model call per message: a short fixed
 skill plus only the project goal, a compact task-status list and the last 8 messages
 (token discipline — no full histories, no skills beyond the one this needs).
+
+The owner's message is stored only together with the manager's reply, after the model call (owner
+decision d19): a refused or failed call (pause, budget, provider error, invalid reply) adds nothing to
+the chat, so a resend leaves no duplicate. Nothing is written before the call either: on SQLite an open
+write transaction holds the database-wide lock for the whole call, and the owner's pause (any write)
+would fail with "database is locked".
 """
 
 import re
@@ -13,7 +19,7 @@ from sqlalchemy.orm import Session
 from app import context
 from app.gateway.service import Gateway
 from app.manager import ManagerError, ensure_active, manager_agent
-from app.models import ChatMessage, Project, Task
+from app.models import ChatMessage, Project, Task, utcnow
 
 _ACTION_RE = re.compile(r"^(none|plan|approve|checkpoint:\d+)$")
 HISTORY_LIMIT = 8
@@ -31,27 +37,24 @@ class ChatReplyOut(BaseModel):
         return v
 
 
-def _chat_user_content(session: Session, project: Project) -> str:
+def _chat_user_content(session: Session, project: Project, text: str) -> str:
     tasks = session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.id)).all()
     task_lines = "\n".join(f"- #{t.id} {t.title} [{t.status.value}]" for t in tasks) or "(no tasks yet)"
-    history = session.scalars(
+    stored = session.scalars(
         select(ChatMessage)
         .where(ChatMessage.project_id == project.id)
         .order_by(ChatMessage.id.desc())
-        .limit(HISTORY_LIMIT)
+        .limit(HISTORY_LIMIT - 1)  # the owner's new message, not stored yet, is the last of the 8
     ).all()
-    history_lines = "\n".join(f"{m.role}: {m.text}" for m in reversed(history))
+    history_lines = "\n".join([*(f"{m.role}: {m.text}" for m in reversed(stored)), f"user: {text}"])
     return f"Project goal: {project.goal}\nTasks:\n{task_lines}\nRecent chat:\n{history_lines}"
 
 
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:
     ensure_active(session, project, "chat")
-    user_msg = ChatMessage(project_id=project.id, role="user", text=text)
-    session.add(user_msg)
-    session.flush()  # so the user's own message counts toward the last-8 window
-
+    sent_at = utcnow()
     system = context.system_prompt(session, manager_agent(session), ["chat-reply"])
-    user = _chat_user_content(session, project)
+    user = _chat_user_content(session, project, text)
     response = gateway.call(
         "manager", system=system, user=user, project_id=project.id, agent="manager",
         json_schema=ChatReplyOut.model_json_schema(),
@@ -61,10 +64,12 @@ def send_message(session: Session, gateway: Gateway, project: Project, text: str
     except ValidationError as e:
         raise ManagerError(f"invalid chat response: {e}") from e
 
+    # Kept even if the owner paused while the call ran: the reply is paid for and starts nothing (d16).
+    user_msg = ChatMessage(project_id=project.id, role="user", text=text, created_at=sent_at)
     manager_msg = ChatMessage(
         project_id=project.id, role="manager", text=reply.reply, suggested_action=reply.suggested_action,
     )
-    session.add(manager_msg)
+    session.add_all([user_msg, manager_msg])  # inserted in this order: the user's message gets the lower id
     session.commit()
     return {"user": user_msg, "manager": manager_msg}
 
