@@ -37,7 +37,7 @@ class ChatReplyOut(BaseModel):
         return v
 
 
-def _chat_user_content(session: Session, project: Project, text: str) -> str:
+def _chat_user_content(session: Session, project: Project, new: ChatMessage) -> str:
     tasks = session.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.id)).all()
     task_lines = "\n".join(f"- #{t.id} {t.title} [{t.status.value}]" for t in tasks) or "(no tasks yet)"
     stored = session.scalars(
@@ -46,15 +46,28 @@ def _chat_user_content(session: Session, project: Project, text: str) -> str:
         .order_by(ChatMessage.id.desc())
         .limit(HISTORY_LIMIT - 1)  # the owner's new message, not stored yet, is the last of the 8
     ).all()
-    history_lines = "\n".join([*(f"{m.role}: {m.text}" for m in reversed(stored)), f"user: {text}"])
+    history_lines = "\n".join(f"{m.role}: {m.text}" for m in [*reversed(stored), new])
     return f"Project goal: {project.goal}\nTasks:\n{task_lines}\nRecent chat:\n{history_lines}"
 
 
+def _check_storable(text: str) -> None:
+    """Refuse, before the paid call, text the database would refuse only after it, at the store (d19): a NUL
+    (PostgreSQL text can't hold one) or a lone surrogate (not encodable as UTF-8)."""
+    if "\x00" in text:
+        raise ManagerError("chat text must not contain NUL characters")
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ManagerError("chat text is not valid Unicode (lone surrogate)") from None
+
+
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:
+    _check_storable(text)
     ensure_active(session, project, "chat")
-    sent_at = utcnow()
+    # In the prompt now, in the session only with the reply: nothing is written while the model runs (d19).
+    user_msg = ChatMessage(project_id=project.id, role="user", text=text, created_at=utcnow())
     system = context.system_prompt(session, manager_agent(session), ["chat-reply"])
-    user = _chat_user_content(session, project, text)
+    user = _chat_user_content(session, project, user_msg)
     response = gateway.call(
         "manager", system=system, user=user, project_id=project.id, agent="manager",
         json_schema=ChatReplyOut.model_json_schema(),
@@ -65,7 +78,6 @@ def send_message(session: Session, gateway: Gateway, project: Project, text: str
         raise ManagerError(f"invalid chat response: {e}") from e
 
     # Kept even if the owner paused while the call ran: the reply is paid for and starts nothing (d16).
-    user_msg = ChatMessage(project_id=project.id, role="user", text=text, created_at=sent_at)
     manager_msg = ChatMessage(
         project_id=project.id, role="manager", text=reply.reply, suggested_action=reply.suggested_action,
     )

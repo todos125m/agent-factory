@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from app import manager
-from app.db import Base, get_session, make_engine
+from app.db import Base, SessionLocal, get_session, make_engine
 from app.gateway.providers import FakeProvider
 from app.gateway.service import Gateway
 from app.main import app
@@ -104,6 +104,17 @@ def _approved_plan(client, pid):
     client.post(f"/projects/{pid}/plan/approve")
     tasks = {t["title"]: t for t in client.get(f"/projects/{pid}/tasks").json()}
     return tasks["Research"], tasks["Define product"]
+
+
+# Every project route that makes a model call: (path, setup, request body, reply). plan/reject enters the call
+# with its rejection staged in the same session, not yet written.
+MODEL_CALL_PATHS = pytest.mark.parametrize("path, setup, body, reply", [
+    ("plan", None, None, PLAN),
+    ("plan/reject", None, {"feedback": "too shallow"}, PLAN),
+    ("tasks/{tid}/checkpoint", _ready_task, None, CHECKPOINT),
+    ("tasks/{tid}/run", _running_task, None, RUN_RESULT),
+    ("chat", None, {"text": "status?"}, CHAT_REPLY),
+], ids=["plan", "reject", "checkpoint", "run", "chat"])
 
 
 # ---------- every manager path, paused: 409 before any model call or state change ----------
@@ -295,13 +306,8 @@ def test_benchmark_runs_while_a_project_is_paused(client, session_factory, proje
     app.dependency_overrides.pop(get_gateway, None)
 
 
-@pytest.mark.parametrize("path, setup, reply", [
-    ("plan", None, PLAN),
-    ("tasks/{tid}/checkpoint", _ready_task, CHECKPOINT),
-    ("tasks/{tid}/run", _running_task, RUN_RESULT),
-    ("chat", None, CHAT_REPLY),
-], ids=["plan", "checkpoint", "run", "chat"])
-def test_a_path_that_skips_ensure_active_is_still_refused(client, project, monkeypatch, path, setup, reply):
+@MODEL_CALL_PATHS
+def test_a_path_that_skips_ensure_active_is_still_refused(client, project, monkeypatch, path, setup, body, reply):
     """A new project-scoped path that forgets ensure_active: the gateway refuses its model call, the router
     answers 409 as for any pause refusal, and nothing the path had started is kept."""
     pid = project["id"]
@@ -312,8 +318,9 @@ def test_a_path_that_skips_ensure_active_is_still_refused(client, project, monke
     tasks = client.get(f"/projects/{pid}/tasks").json()
     _pause(client, pid)
 
-    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json={"text": "status?"} if path == "chat" else None)
+    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json=body)
     _assert_refused(client, pid, r, "model_call", tid)
+    assert [e["type"] for e in _events(client, pid)][-2:] == ["project.paused", "pause.blocked"]  # e.g. no rejection
     assert fake.requests == []
     assert client.get(f"/projects/{pid}/tasks").json() == tasks
     assert client.get(f"/projects/{pid}/chat").json() == []  # chat stores the owner's message only with a reply (d19)
@@ -494,13 +501,14 @@ def test_pause_during_run_of_a_leaf_task_withholds_nothing(client, session_facto
 
 @pytest.fixture
 def file_client(tmp_path):
-    """The app on a file-based SQLite database, like the default agent_factory.db: each session gets its own
+    """The app on a file-based SQLite database, like the default agent_factory.db, with production's session
+    options (autoflush decides what a session writes before a model call): each session gets its own
     connection, so SQLite's database-wide write lock is real here (the other tests share one in-memory
     connection, which can't show it). Yields the client and its session factory."""
     engine = make_engine(f"sqlite:///{tmp_path / 'agent_factory.db'}")
     assert isinstance(engine.pool, QueuePool)  # one connection per session, even within one thread
     Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    factory = sessionmaker(**{**SessionLocal.kw, "bind": engine})
     with factory() as s:
         sync_from_files(s)
 
@@ -514,24 +522,22 @@ def file_client(tmp_path):
     engine.dispose()
 
 
-@pytest.mark.parametrize("path, setup, reply", [
-    ("chat", None, CHAT_REPLY),
-    ("plan", None, PLAN),
-    ("tasks/{tid}/checkpoint", _ready_task, CHECKPOINT),
-    ("tasks/{tid}/run", _running_task, RUN_RESULT),
-], ids=["chat", "plan", "checkpoint", "run"])
-def test_a_pause_commits_while_a_model_call_is_in_flight_on_file_sqlite(file_client, monkeypatch, path, setup, reply):
+@MODEL_CALL_PATHS
+def test_a_pause_commits_while_a_model_call_is_in_flight_on_file_sqlite(
+    file_client, monkeypatch, path, setup, body, reply
+):
     """The reported bug: chat flushed the owner's message before its model call, and on SQLite that open write
     transaction held the database-wide write lock for the whole call, so the owner's pause (or any write) waited
     out the 5 s busy timeout and failed with "database is locked" (500). No model-call path may hold a write
-    transaction while the provider runs: the pause, on its own connection, commits mid-call."""
+    transaction while the provider runs, plan/reject's staged rejection included: the pause, on its own
+    connection, commits mid-call."""
     client, factory = file_client
     user = client.post("/users", json={"email": "f@example.com"}).json()
     pid = client.post("/projects", json={"owner_id": user["id"], "title": "P", "goal": "g"}).json()["id"]
     tid = setup(client, pid)["id"] if setup else None
     use_real_gateway(client, monkeypatch, PausingProvider(factory, pid, [reply]))
 
-    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json={"text": "status?"} if path == "chat" else None)
+    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json=body)
     assert r.status_code == 200, r.text  # the call already in flight keeps its paid-for result (d16)
     assert client.get(f"/projects/{pid}").json()["paused"] is True
     assert "project.paused" in {e["type"] for e in _events(client, pid)}

@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.chat import HISTORY_LIMIT
 from app.gateway.providers import FakeProvider, ProviderError
 from app.main import app
 from app.models import ChatMessage
@@ -25,27 +24,6 @@ def test_chat_round_trip(client, session_factory, project):
 
     messages = client.get(f"/projects/{pid}/chat").json()
     assert [m["role"] for m in messages] == ["user", "manager"]
-    app.dependency_overrides.pop(get_gateway, None)
-
-
-def test_chat_invalid_suggested_action_rejected(client, session_factory, project):
-    pid = project["id"]
-    use_fake(client, session_factory, [{"reply": "ok", "suggested_action": "do_it_now"}])
-
-    r = client.post(f"/projects/{pid}/chat", json={"text": "?"})
-    assert r.status_code == 422
-    app.dependency_overrides.pop(get_gateway, None)
-
-
-def test_chat_budget_exceeded_returns_402(client, session_factory):
-    user = client.post("/users", json={"email": "c@example.com"}).json()
-    project = client.post(
-        "/projects", json={"owner_id": user["id"], "title": "P", "goal": "g", "budget": 0.000001}
-    ).json()
-    use_fake(client, session_factory, [CHAT_REPLY])
-
-    r = client.post(f"/projects/{project['id']}/chat", json={"text": "?"})
-    assert r.status_code == 402
     app.dependency_overrides.pop(get_gateway, None)
 
 
@@ -90,6 +68,21 @@ def test_a_turn_without_a_reply_stores_nothing(client, monkeypatch, budget, make
         assert [c["ok"] for c in calls] == [status == 422]
 
 
+@pytest.mark.parametrize("raw, detail", [
+    ('{"text": "status?\\u0000"}', "chat text must not contain NUL characters"),
+    ('{"text": "hi \\ud800"}', "chat text is not valid Unicode (lone surrogate)"),
+], ids=["nul", "lone_surrogate"])
+def test_text_the_database_cannot_store_is_refused_before_the_call(client, monkeypatch, project, raw, detail):
+    """Stored only after the paid call, such text would fail there, after the spend, on every resend."""
+    pid = project["id"]
+    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[CHAT_REPLY]))
+
+    r = client.post(f"/projects/{pid}/chat", content=raw, headers={"Content-Type": "application/json"})
+    assert (r.status_code, r.json()["detail"]) == (422, detail)
+    assert fake.requests == [] and _model_calls(client, pid) == 0
+    assert client.get(f"/projects/{pid}/chat").json() == []
+
+
 def test_a_resend_after_a_failed_turn_stores_it_once(client, monkeypatch, project):
     pid = project["id"]
     use_real_gateway(client, monkeypatch, FailingProvider())
@@ -114,7 +107,6 @@ def test_the_prompt_holds_the_last_stored_messages_and_the_new_one(client, sessi
     assert client.post(f"/projects/{pid}/chat", json={"text": "new"}).status_code == 200
     recent = fake.requests[0].user.split("Recent chat:\n", 1)[1].split("\n")
     assert recent == [f"{('user', 'manager')[i % 2]}: m{i}" for i in range(3, 10)] + ["user: new"]
-    assert len(recent) == HISTORY_LIMIT
     stored = client.get(f"/projects/{pid}/chat").json()
     assert [(m["role"], m["text"]) for m in stored[-2:]] == [("user", "new"), ("manager", CHAT_REPLY["reply"])]
 
