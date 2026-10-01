@@ -4,8 +4,12 @@ One check, run at every entry point (app/manager.py::ensure_active) and again as
 paused work would happen — before every model call (Gateway.call, which can't import app.manager) and in
 every task move (check_task_move; a test keeps every status write in app/ behind it) — so a path that
 misses the first still spends nothing and starts nothing. A pause that lands after a move was checked is
-caught as the move commits (commit_unless_paused; work already past a model call uses
-app/manager.py::_paused_now).
+caught as the move commits (commit_unless_paused; work already past a model call uses lock_project).
+
+The project row is the per-project queue for everything that must not interleave with a pause: a move's commit,
+a completion's check, a plan decision, a paid call's budget reservation (app/gateway/service.py). They all lock
+it the same way (_paused with lock=True); tests/test_pause_task_moves.py and tests/test_budget_holds.py pin the
+PostgreSQL SQL.
 """
 
 from typing import Any
@@ -30,6 +34,12 @@ def _paused(session: Session, project_id: int, *, lock: bool = False) -> bool:
         session.flush()
         query = query.with_for_update(key_share=True)
     return bool(session.scalar(query))  # no such project: not paused
+
+
+def lock_project(session: Session, project_id: int) -> bool:
+    """Flush the caller's work, lock the project row (see _paused) and return `paused`, for work that is past
+    its entry check and must not interleave with a pause or another locker until the caller commits."""
+    return _paused(session, project_id, lock=True)
 
 
 def _refuse(session: Session, project_id: int, action: str, task_id: int | None, **detail: Any) -> None:

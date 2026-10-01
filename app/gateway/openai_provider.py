@@ -27,7 +27,7 @@ provider guaranteed the shape.
 import json
 from typing import Any
 
-from app.gateway.providers import ModelRequest, ModelResponse, ProviderError, Usage
+from app.gateway.providers import ModelRequest, ModelResponse, ProviderError, Usage, paid_client_limits
 
 
 class OpenAIProvider:
@@ -42,7 +42,7 @@ class OpenAIProvider:
                 import openai
             except ImportError as e:
                 raise ProviderError("openai package not installed: pip install -e '.[openai]'") from e
-            self._client = openai.OpenAI()  # OPENAI_API_KEY from env
+            self._client = openai.OpenAI(**paid_client_limits())  # OPENAI_API_KEY from env
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:

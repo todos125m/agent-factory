@@ -7,8 +7,6 @@ project's model call itself too, for a path that skips the manager's check. Fake
 """
 
 import pytest
-from sqlalchemy import event
-from sqlalchemy.dialects import postgresql
 
 from app import manager
 from app.gateway.providers import FakeProvider, ProviderError
@@ -60,6 +58,26 @@ class PausingProvider(FakeProvider):
         with self.session_factory() as s:  # the owner's pause request, in its own session
             set_paused(self.project_id, ProjectPauseUpdate(paused=True), session=s)
         return super().complete(request)
+
+
+class ActsDuringCall(FakeProvider):
+    """Replies like FakeProvider, but `during()` happens to the project while the call is in flight."""
+
+    def __init__(self, replies, during):
+        super().__init__(replies=list(replies))
+        self.during = during
+
+    def complete(self, request):
+        self.during()
+        return super().complete(request)
+
+
+class FailingProvider(FakeProvider):
+    """The model call fails (a timeout): the request is recorded, then ProviderError."""
+
+    def complete(self, request):
+        self.requests.append(request)
+        raise ProviderError("model timed out")
 
 
 def _pause(client, pid, paused=True):
@@ -334,47 +352,24 @@ def test_a_route_that_does_not_map_the_refusal_still_answers_409(client, project
     assert fake.requests == []
 
 
-def test_a_pause_after_the_reject_check_keeps_the_plan(client, session_factory, project, monkeypatch):
-    """Reject and re-plan are one unit: when the owner pauses right after the reject's entry check, the
-    re-plan's model call is refused by the gateway before anything was rejected — the plan is not deleted for
-    nothing."""
-    pid = project["id"]
-    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, PLAN]))
-    client.post(f"/projects/{pid}/plan")
-    tasks = client.get(f"/projects/{pid}/tasks").json()
-    ensure_active = manager.ensure_active
-
-    def check_then_the_owner_pauses(*args, **kwargs):
-        ensure_active(*args, **kwargs)
-        with session_factory() as s:  # the owner's pause request, in its own session
-            set_paused(pid, ProjectPauseUpdate(paused=True), session=s)
-
-    monkeypatch.setattr("app.manager.ensure_active", check_then_the_owner_pauses)
-    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
-    _assert_refused(client, pid, r, "model_call", calls_before=1)
-    assert len(fake.requests) == 1
-    assert client.get(f"/projects/{pid}/tasks").json() == tasks
-    assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
-
-
-class _FailingProvider(FakeProvider):
-    def complete(self, request):
-        self.requests.append(request)
-        raise ProviderError("model timed out")
-
-
-@pytest.mark.parametrize("failure, status", [("budget", 402), ("provider_error", 502), ("invalid_plan", 422)])
+@pytest.mark.parametrize("failure, status", [
+    ("paused_after_the_entry_check", 409), ("budget", 402), ("provider_error", 502), ("invalid_plan", 422),
+])
 def test_a_failed_replan_keeps_the_plan(client, project, monkeypatch, failure, status):
-    """The rest of the unit: a re-plan refused for budget, failed by the provider or answered with an invalid
-    plan rejects nothing either — the gateway's own commits (its budget.exceeded event, its ModelCall row) carry
-    none of the rejection."""
+    """Reject and re-plan are one unit: a re-plan refused (the owner pauses right after the reject's entry check,
+    which the gateway's own check then catches; or the budget is spent), failed by the provider or answered with
+    an invalid plan rejects nothing either — the gateway's own commits (its budget.exceeded event, its ModelCall
+    row) carry none of the rejection."""
     pid = project["id"]
     use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
     client.post(f"/projects/{pid}/plan")
     tasks = client.get(f"/projects/{pid}/tasks").json()
     if failure == "budget":
         assert client.put(f"/settings/project/{pid}", json={"budget": {"project_usd": 0.000001}}).status_code == 200
-    replan = {"provider_error": _FailingProvider(), "invalid_plan": FakeProvider(replies=[{**PLAN, "steps": []}])}
+    if failure == "paused_after_the_entry_check":
+        monkeypatch.setattr("app.manager.ensure_active", lambda *a, **kw: None)
+        _pause(client, pid)
+    replan = {"provider_error": FailingProvider(), "invalid_plan": FakeProvider(replies=[{**PLAN, "steps": []}])}
     use_real_gateway(client, monkeypatch, replan.get(failure, FakeProvider(replies=[PLAN])))
 
     r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
@@ -383,38 +378,104 @@ def test_a_failed_replan_keeps_the_plan(client, project, monkeypatch, failure, s
     assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
 
 
-def test_a_pause_landing_mid_replan_keeps_the_paid_for_plan(client, session_factory, project, monkeypatch):
-    """d16: the re-plan already in flight keeps its result, and the rejection with it (its tasks are CREATED,
-    so nothing starts while paused)."""
+def _approves(session_factory, pid):
+    with session_factory() as s:  # the owner approves the plan from another tab, in its own session
+        manager.approve_plan(s, s.get(Project, pid))
+
+
+def _replans(session_factory, pid):
+    with session_factory() as s:  # a second plan (the chat's "plan" button), in its own session
+        manager.create_plan(s, Gateway(s, providers={"fake": FakeProvider(replies=[PLAN])}), s.get(Project, pid))
+
+
+def _rejects_again(session_factory, pid):
+    with session_factory() as s:  # a second reject (a double tap, another device), in its own session
+        manager.reject_plan(
+            s, Gateway(s, providers={"fake": FakeProvider(replies=[PLAN])}), s.get(Project, pid), "again",
+        )
+
+
+@pytest.mark.parametrize("meanwhile, tasks_after, plans, rejections", [
+    (_approves, ["CREATED", "READY"], 1, 0),
+    (_replans, ["CREATED"] * 4, 2, 0),
+    (_rejects_again, ["CREATED"] * 2, 2, 1),
+], ids=["approved", "replanned", "rejected_again"])
+def test_a_plan_decided_during_the_replan_is_not_rejected(
+    client, session_factory, project, monkeypatch, meanwhile, tasks_after, plans, rejections
+):
+    """A reject applies to the plan that was pending when it arrived. If that plan was decided while the re-plan's
+    model call ran (approved, planned again or rejected again, from another tab or device) the rejection no
+    longer applies: 409, the paid re-plan is only logged, and what the other request did stands — the rejection
+    never deletes a plan the owner didn't see, nor half of one that was approved."""
+    pid = project["id"]
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
+    client.post(f"/projects/{pid}/plan")
+    use_real_gateway(client, monkeypatch, ActsDuringCall([PLAN], lambda: meanwhile(session_factory, pid)))
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == 409 and "decided while it was being re-planned" in r.json()["detail"], r.text
+    assert sorted(t["status"] for t in client.get(f"/projects/{pid}/tasks").json()) == tasks_after
+    types = [e["type"] for e in _events(client, pid)]
+    assert (types.count("plan.proposed"), types.count("decision.plan_rejected")) == (plans, rejections)
+    assert ("decision.plan_approved" in types) is (meanwhile is _approves)
+
+
+def test_a_reject_after_an_earlier_approval_still_works(client, project, monkeypatch):
+    """Only a plan decision that lands during the re-plan makes a reject stale, not one made before the request:
+    approving and then rejecting (the plan's started tasks stay, its undecided ones are replaced) is allowed."""
+    pid = project["id"]
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, {**PLAN, "understanding": "Revised"}]))
+    research, product = _approved_plan(client, pid)
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == 200 and r.json()["understanding"] == "Revised", r.text
+    rejected = [e for e in _events(client, pid) if e["type"] == "decision.plan_rejected"]
+    assert len(rejected) == 1 and rejected[0]["payload"]["deleted_task_ids"] == [product["id"]]
+    assert _status(client, pid, research["id"]) == "READY"  # approved, so not part of what is rejected
+
+
+def test_the_reject_checks_the_plan_under_the_projects_lock(client, session_factory, project, monkeypatch):
+    """The check that the plan is still pending runs once the lock is taken, not before it: an approve landing
+    between the reject's staging and its lock (the window a check made earlier would miss) is seen."""
+    pid = project["id"]
+    use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, PLAN]))
+    client.post(f"/projects/{pid}/plan")
+    lock_project = manager.lock_project
+
+    def approved_just_before_the_lock(session, project_id):
+        _approves(session_factory, pid)
+        return lock_project(session, project_id)
+
+    monkeypatch.setattr("app.manager.lock_project", approved_just_before_the_lock)
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == 409, r.text
+    assert sorted(t["status"] for t in client.get(f"/projects/{pid}/tasks").json()) == ["CREATED", "READY"]
+    assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
+
+
+@pytest.mark.parametrize("paused_mid_call", [False, True], ids=["running", "paused_mid_call"])
+def test_reject_and_replan_land_together_through_the_real_gateway(
+    client, session_factory, project, monkeypatch, paused_mid_call
+):
+    """The rejection and the new plan land in one commit after the re-plan's call; with the gateway on the
+    route's own session (as in production) both land. A pause landing while the call runs (d16) keeps the paid-for
+    plan and the rejection with it: its tasks are CREATED, so nothing starts while paused."""
     pid = project["id"]
     use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
     client.post(f"/projects/{pid}/plan")
     old = {t["id"] for t in client.get(f"/projects/{pid}/tasks").json()}
-    revised = {**PLAN, "understanding": "Revised"}
-    use_real_gateway(client, monkeypatch, PausingProvider(session_factory, pid, [revised]))
+    revised = [{**PLAN, "understanding": "Revised"}]
+    replan = PausingProvider(session_factory, pid, revised) if paused_mid_call else FakeProvider(replies=revised)
+    use_real_gateway(client, monkeypatch, replan)
 
     r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
     assert r.status_code == 200 and r.json()["understanding"] == "Revised", r.text
-    assert client.get(f"/projects/{pid}").json()["paused"] is True
-    assert {t["status"] for t in client.get(f"/projects/{pid}/tasks").json()} == {"CREATED"}
+    assert client.get(f"/projects/{pid}").json()["paused"] is paused_mid_call
+    tasks = client.get(f"/projects/{pid}/tasks").json()
+    assert len(tasks) == 2 and {t["status"] for t in tasks} == {"CREATED"}  # SQLite may reuse the deleted ids
     rejected = [e for e in _events(client, pid) if e["type"] == "decision.plan_rejected"]
     assert len(rejected) == 1 and set(rejected[0]["payload"]["deleted_task_ids"]) == old
-
-
-def test_reject_and_replan_land_together_through_the_real_gateway(client, project, monkeypatch):
-    """The rejection and the new plan land in one commit after the re-plan's call; with the gateway on the
-    route's own session (as in production) both land."""
-    pid = project["id"]
-    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, {**PLAN, "understanding": "Revised"}]))
-    client.post(f"/projects/{pid}/plan")
-    old = {t["id"] for t in client.get(f"/projects/{pid}/tasks").json()}
-
-    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
-    assert r.status_code == 200 and r.json()["understanding"] == "Revised", r.text
-    assert len(client.get(f"/projects/{pid}/tasks").json()) == 2  # SQLite may reuse the deleted ids
-    rejected = [e for e in _events(client, pid) if e["type"] == "decision.plan_rejected"]
-    assert len(rejected) == 1 and set(rejected[0]["payload"]["deleted_task_ids"]) == old
-    assert len(fake.requests) == 2 and _model_calls(client, pid) == 2
+    assert _model_calls(client, pid) == 2
 
 
 # ---------- unpaused happy path: after a resume nothing is stuck ----------
@@ -529,17 +590,6 @@ def test_pause_during_run_of_a_leaf_task_withholds_nothing(client, session_facto
     assert r.status_code == 200 and r.json()["task"]["status"] == "COMPLETED"
     assert "pause.withheld" not in {e["type"] for e in _events(client, pid)}
     app.dependency_overrides.pop(get_gateway, None)
-
-
-def test_the_mid_flight_pause_check_lets_two_completions_queue_on_postgresql(session, project):
-    """PostgreSQL: _paused_now's lock is FOR NO KEY UPDATE, like the move commit guard (app/pause.py). It still
-    conflicts with the pause's UPDATE, but not with the KEY SHARE that a completion's flushed rows (events,
-    memory) take on the project row through their foreign keys; FOR UPDATE would, and two runs finishing in one
-    project could deadlock."""
-    statements = []
-    event.listen(session, "do_orm_execute", lambda state: statements.append(state.statement))
-    assert manager._paused_now(session, session.get(Project, project["id"])) is False
-    assert str(statements[-1].compile(dialect=postgresql.dialect())).endswith("FOR NO KEY UPDATE")
 
 
 @MODEL_CALL_PATHS

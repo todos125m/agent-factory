@@ -10,6 +10,23 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+# The paid SDK clients' limits, pinned here (they are the SDKs' own defaults) so the longest a paid call can run
+# is known: an attempt gives up after REQUEST_TIMEOUT_S (5 s to connect), a timed-out or overloaded request is
+# retried MAX_RETRIES times, and a retry waits at most RETRY_WAIT_S (the SDKs honor a Retry-After of up to 60 s).
+# The gateway sizes its budget holds from MAX_CALL_S (app/gateway/service.py::HOLD_TTL).
+REQUEST_TIMEOUT_S = 600.0
+CONNECT_TIMEOUT_S = 5.0
+MAX_RETRIES = 2
+RETRY_WAIT_S = 60.0
+MAX_CALL_S = (MAX_RETRIES + 1) * REQUEST_TIMEOUT_S + MAX_RETRIES * RETRY_WAIT_S
+
+
+def paid_client_limits() -> dict[str, Any]:
+    """The keyword arguments both paid SDK clients (anthropic.Anthropic, openai.OpenAI) take for the limits above."""
+    import httpx  # a dependency of both SDKs, so there whenever one is
+
+    return {"timeout": httpx.Timeout(REQUEST_TIMEOUT_S, connect=CONNECT_TIMEOUT_S), "max_retries": MAX_RETRIES}
+
 
 @dataclass
 class WebSearchConfig:
@@ -72,7 +89,7 @@ class AnthropicProvider:
                 import anthropic
             except ImportError as e:
                 raise ProviderError("anthropic package not installed: pip install -e '.[anthropic]'") from e
-            self._client = anthropic.Anthropic()  # credentials from env / `ant auth login`
+            self._client = anthropic.Anthropic(**paid_client_limits())  # credentials from env / `ant auth login`
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:

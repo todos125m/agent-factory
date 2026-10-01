@@ -77,7 +77,7 @@ The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
 |---|---|---|
 | POST | `/projects/{id}/plan` | One model call → task graph; unknown agents become `specialist.requested`; waits for approval |
 | POST | `/projects/{id}/plan/approve` | Move dependency-free `CREATED` tasks to `READY` |
-| POST | `/projects/{id}/plan/reject` | Delete the proposed tasks and re-plan with `{feedback}` |
+| POST | `/projects/{id}/plan/reject` | Re-plan with `{feedback}` and, with the new plan, delete the proposed tasks that were still `CREATED` — one unit: nothing is rejected until the re-plan's call succeeded and passed every check (a 402/502/422/409 leaves the old plan as it was), and only if that plan was not decided meanwhile (approved, planned again or rejected again from another tab: 409) |
 | POST | `/projects/{id}/tasks/{tid}/checkpoint` | Model proposes options + a recommendation; auto-decided unless mode/risk requires the user |
 | POST | `/projects/{id}/tasks/{tid}/decide` | `{option, note?}` → records the decision, moves the task `READY → RUNNING` |
 | POST | `/projects/{id}/tasks/{tid}/run` | Executes a `RUNNING` task with its owner agent (Phase 4): one `Gateway.call` (agent's role + skills + `context.task_context`, which includes the chosen option and dependency summaries) → `{summary, findings[{claim,type,basis}], lesson, next}`; stores the output, moves `RUNNING → COMPLETED`, and any dependent task whose dependencies are now all done becomes `READY` |
@@ -156,10 +156,13 @@ which question comes next and how answers become a blueprint are pure code. The 
 | GET | `/projects/{id}/model_calls` | Every model call for a project (role, provider, model, tokens, cost) |
 
 Agents and skills are defined as files in `registry/` and synced at startup.
-Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
-every call logged with tokens and cost). A paid call's worst-case cost is held against its budgets while it
-runs, so calls in flight at the same time can't together pass a budget; nothing (no transaction, no SQLite write
-lock) stays open while a model runs. `app/context.py` builds the smallest prompt a call needs.
+Model calls go through `app/gateway` (role → provider/model from settings, every call logged with tokens and
+cost). Before a paid call runs, its estimated worst case (its prompt as input plus every output token; web-search
+fees and the tokens of search results are not priced in) is checked against the task's and the project's budgets
+together with the paid calls already in flight, and held while it runs: calls started at the same time are
+checked against one another, a refusal is `budget.exceeded` (402), and a hold left by a process that stopped
+mid-call stops counting after `HOLD_TTL`. Nothing (no transaction, no SQLite write lock) stays open while a model
+runs. `app/context.py` builds the smallest prompt a call needs.
 
 ### Model access
 

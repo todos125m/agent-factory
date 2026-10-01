@@ -12,47 +12,29 @@ would fail with "database is locked".
 import re
 from typing import Any
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import context
+from app import context, storable
 from app.gateway.service import Gateway
 from app.manager import ManagerError, ensure_active, manager_agent
 from app.models import ChatMessage, Project, Task, utcnow
 
-_ACTION_RE = re.compile(r"^(none|plan|approve|checkpoint:\d{1,12})$")  # fits ChatMessage.suggested_action
+# Matched whole and ASCII-only: `\d` and `$` would also take Persian digits and a trailing newline, which the
+# web UI's own test of the action (web/app.js) doesn't, so the suggestion would be stored and then show nothing.
+_ACTION_RE = re.compile(r"none|plan|approve|checkpoint:[0-9]{1,12}")  # fits ChatMessage.suggested_action
 HISTORY_LIMIT = 8
 
 
-def _unstorable(text: str) -> str | None:
-    """Why the database would refuse `text`, if it would: both halves of a turn are stored only after the paid
-    call (d19), so this is checked before the store can fail there. NUL: PostgreSQL text can't hold one; a lone
-    surrogate: not encodable as UTF-8."""
-    if "\x00" in text:
-        return "must not contain NUL characters"
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return "is not valid Unicode (lone surrogate)"
-    return None
-
-
-class ChatReplyOut(BaseModel):
+class ChatReplyOut(storable.StorableOut):
     reply: str
     suggested_action: str = "none"
-
-    @field_validator("reply")
-    @classmethod
-    def _storable_reply(cls, v: str) -> str:
-        if problem := _unstorable(v):
-            raise ValueError(f"reply {problem}")
-        return v
 
     @field_validator("suggested_action")
     @classmethod
     def _valid_action(cls, v: str) -> str:
-        if not _ACTION_RE.match(v):
+        if not _ACTION_RE.fullmatch(v):
             raise ValueError("suggested_action must be none, plan, approve or checkpoint:<task_id>")
         return v
 
@@ -71,7 +53,7 @@ def _chat_user_content(session: Session, project: Project, new: ChatMessage) -> 
 
 
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:
-    if problem := _unstorable(text):  # refused before the call, not at the store after it
+    if problem := storable.problem(text):  # refused before the call, not at the store after it
         raise ManagerError(f"chat text {problem}")
     ensure_active(session, project, "chat")
     # In the prompt now, in the session only with the reply: nothing is written while the model runs (d19).

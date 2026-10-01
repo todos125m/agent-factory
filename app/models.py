@@ -289,8 +289,9 @@ class ModelCall(Base):
     __tablename__ = "model_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
-    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    # Indexed: every paid call sums its project's and task's logged cost while it holds the project's queue.
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     agent: Mapped[str | None] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(50))
     provider: Mapped[str] = mapped_column(String(50))
@@ -315,7 +316,9 @@ class BudgetHold(Base):
     __tablename__ = "budget_holds"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
-    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    # Like ModelCall.task_id: a task deleted mid-call (a rejected plan's) must not take the hold, and with it the
+    # project's in-flight spend, along; the hold keeps counting against the project until the call finishes.
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     usd: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

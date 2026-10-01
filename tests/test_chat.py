@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.gateway.providers import FakeProvider, ProviderError
+from app.gateway.providers import FakeProvider
 from app.main import app
 from app.models import ChatMessage
 from app.routers.manager import get_gateway
 from tests.test_manager import use_fake
-from tests.test_project_pause import _events, _model_calls, use_real_gateway
+from tests.test_project_pause import FailingProvider, _events, _model_calls, use_real_gateway
 
 CHAT_REPLY = {"reply": "برنامه‌ات آماده نیست؛ بریزیمش؟", "suggested_action": "plan"}
 
@@ -40,12 +40,6 @@ def test_chat_prompt_uses_only_chat_reply_skill(client, session_factory, project
 # ---------- owner decision d19: the owner's message is stored only together with the reply ----------
 
 
-class FailingProvider(FakeProvider):
-    def complete(self, request):
-        self.requests.append(request)
-        raise ProviderError("model timed out")
-
-
 @pytest.mark.parametrize("budget, make_provider, status", [
     (0.000001, lambda: FakeProvider(replies=[CHAT_REPLY]), 402),
     (None, FailingProvider, 502),
@@ -54,7 +48,14 @@ class FailingProvider(FakeProvider):
     (None, lambda: FakeProvider(replies=[{"reply": "ok \ud83d", "suggested_action": "none"}]), 422),
     (None, lambda: FakeProvider(replies=[{"reply": "ok\u0000", "suggested_action": "none"}]), 422),
     (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "checkpoint:" + "9" * 13}]), 422),
-], ids=["budget", "provider_error", "invalid_reply", "lone_surrogate_reply", "nul_reply", "oversized_checkpoint"])
+    # The web UI tests the action with ASCII digits and an exact match, so these would be stored and show nothing.
+    (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "checkpoint:\u06f1\u06f2"}]), 422),
+    (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "plan\n"}]), 422),
+    (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "checkpoint:3\n"}]), 422),
+], ids=[
+    "budget", "provider_error", "invalid_reply", "lone_surrogate_reply", "nul_reply", "oversized_checkpoint",
+    "persian_digits", "trailing_newline", "trailing_newline_checkpoint",
+])
 def test_a_turn_without_a_reply_stores_nothing(client, monkeypatch, budget, make_provider, status):
     """Nothing reaches the chat, so a resend leaves no unanswered duplicate; the failure itself stays on the
     record. Through the real gateway, on the route's own session, as in production."""

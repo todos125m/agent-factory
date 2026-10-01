@@ -5,15 +5,15 @@ resolution, state transitions) stays in code; the model only proposes plans and 
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import context, memory, settings_layers, sources
+from app import context, memory, settings_layers, sources, storable
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
-from app.pause import check_task_move, commit_unless_paused, refuse_if_paused
+from app.pause import check_task_move, commit_unless_paused, lock_project, refuse_if_paused
 from app.state_machine import TransitionError
 
 
@@ -30,14 +30,10 @@ def ensure_active(session: Session, project: Project, action: str, task_id: int 
 
 def _paused_now(session: Session, project: Project) -> bool:
     """Fresh read of `paused` for work already past `ensure_active`: the owner may have paused while its
-    model call ran, and loaded objects are never expired here. Flushing first and reading under a row lock keep
-    a pause from landing between this check and the caller's commit (SQLite: the flush takes the write lock;
-    PostgreSQL: FOR NO KEY UPDATE, as app/pause.py's commit guard — it conflicts with the pause's UPDATE but not
-    with the KEY SHARE locks the flushed rows' foreign keys take on the project row, so two completions in one
-    project queue instead of deadlocking)."""
-    session.flush()
-    session.refresh(project, attribute_names=["paused"], with_for_update={"key_share": True})
-    return project.paused
+    model call ran, and loaded objects are never expired here. Flushing first and reading under the project
+    row lock (app/pause.py::lock_project) keep a pause from landing between this check and the caller's
+    commit; the lock mode is what lets two completions in one project queue instead of deadlocking."""
+    return lock_project(session, project.id)
 
 
 class PlanStepIn(BaseModel):
@@ -47,8 +43,18 @@ class PlanStepIn(BaseModel):
     depends_on: list[int] = Field(default_factory=list)
     risk: RiskLevel = RiskLevel.LOW
 
+    @field_validator("title", "agent")
+    @classmethod
+    def _fits_its_column(cls, v: str, info: ValidationInfo) -> str:
+        """tasks.title is String(300) and tasks.owner String(100): PostgreSQL refuses a longer value, after the spend.
+        A validator, not Field(max_length), so the JSON schema sent to the provider stays as it was."""
+        limit = {"title": 300, "agent": 100}[info.field_name]
+        if len(v) > limit:
+            raise ValueError(f"{info.field_name} must be at most {limit} characters")
+        return v
 
-class PlanIn(BaseModel):
+
+class PlanIn(storable.StorableOut):
     understanding: str
     assumptions: list[str] = Field(default_factory=list)
     steps: list[PlanStepIn]
@@ -59,7 +65,7 @@ class CheckpointOption(BaseModel):
     tradeoff: str
 
 
-class CheckpointOut(BaseModel):
+class CheckpointOut(storable.StorableOut):
     challenge: str
     options: list[CheckpointOption] = Field(min_length=2, max_length=4)
     recommended: int
@@ -72,7 +78,7 @@ class TaskFinding(BaseModel):
     basis: str
 
 
-class TaskRunOut(BaseModel):
+class TaskRunOut(storable.StorableOut):
     summary: str
     findings: list[TaskFinding] = Field(default_factory=list)
     lesson: str
@@ -259,27 +265,51 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
     return {"ready_task_ids": ready_ids}
 
 
+# What decides a plan's fate: one of these after the plan a reject was made against means it is no longer pending.
+_PLAN_EVENTS = ("plan.proposed", "decision.plan_approved", "decision.plan_rejected")
+
+
 def reject_plan(session: Session, gateway: Gateway, project: Project, feedback: str) -> dict[str, Any]:
-    """Reject the last proposed plan and re-plan with the owner's feedback, as one unit: nothing is staged until
-    the new plan is in (its model call returned and passed every check), so a refused or failed re-plan
-    (pause, budget, provider error, invalid plan) leaves the old plan as it was, and the gateway's own commits
-    carry none of the rejection. The rejection and the new plan then land in one commit."""
+    """Reject the pending plan and re-plan with the owner's feedback, as one unit.
+
+    The plan rejected is the one pending when the request arrived. Nothing is staged until the re-plan's model
+    call returned and passed every check, so a refused or failed re-plan (pause, budget, provider error, invalid
+    plan) leaves the old plan as it was, and the gateway's own commits carry none of the rejection. If the plan
+    was decided while the call ran (approved, re-planned or rejected from another tab or device) the rejection
+    no longer applies: 409, with the paid re-plan only logged. Otherwise the rejection and the new plan land in
+    one commit, checked under the project lock so no plan decision can land in between."""
     ensure_active(session, project, "plan.reject")
-    plan = _propose_plan(session, gateway, project, feedback)
     last_plan = session.scalar(
         select(RunEvent)
         .where(RunEvent.project_id == project.id, RunEvent.type == "plan.proposed")
         .order_by(RunEvent.id.desc())
     )
     proposed_ids = last_plan.payload.get("task_ids", []) if last_plan else []
-    tasks = (
+    seen_event_id = session.scalar(  # a plan decision after this one, not an earlier one, is "meanwhile"
+        select(func.max(RunEvent.id)).where(RunEvent.project_id == project.id, RunEvent.type.in_(_PLAN_EVENTS))
+    ) or 0
+    plan = _propose_plan(session, gateway, project, feedback)
+
+    tasks = (  # what is still undecided of the plan the owner rejected
         session.scalars(select(Task).where(Task.id.in_(proposed_ids), Task.status == TaskStatus.CREATED)).all()
         if proposed_ids else []
     )
     deleted_ids = [t.id for t in tasks]
     for t in tasks:
         session.delete(t)
-    record_event(session, project.id, "decision.plan_rejected", None, feedback=feedback, deleted_task_ids=deleted_ids)
+    rejected = record_event(
+        session, project.id, "decision.plan_rejected", None, feedback=feedback, deleted_task_ids=deleted_ids
+    )
+    lock_project(session, project.id)  # flushes the rejection; from here nothing else decides this plan
+    decided_meanwhile = session.scalar(
+        select(RunEvent.id).where(
+            RunEvent.project_id == project.id, RunEvent.type.in_(_PLAN_EVENTS),
+            RunEvent.id > seen_event_id, RunEvent.id != rejected.id,
+        ).limit(1)
+    )
+    if decided_meanwhile is not None:
+        session.rollback()
+        raise TransitionError("The plan was decided while it was being re-planned; look at the current plan")
     result = _add_plan(session, project, plan)
     session.commit()
     return result

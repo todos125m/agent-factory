@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import sources
-from app.db import Base, SessionLocal, engine
+from app.db import Base, SessionLocal, engine, ensure_indexes
 from app.registry import sync_from_files
 from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
 from app.state_machine import ProjectPaused, TransitionError
@@ -21,6 +21,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 async def lifespan(_: FastAPI):
     # Phase 1 convenience; switch to Alembic migrations once the schema settles.
     Base.metadata.create_all(engine)
+    ensure_indexes(engine)
     with SessionLocal() as session:
         sync_from_files(session)
     sources.load_rules()  # fail fast on a broken registry/source_tiers.yaml, not mid task run
