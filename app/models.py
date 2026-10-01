@@ -1,7 +1,7 @@
 """Data model (docs/ARCHITECTURE.md §10, §22, §23, §31, §40, §50).
 
 Foundation: User, Workspace, Project, Task, TaskDependency, RunEvent.
-Infrastructure: SettingsLayer, Agent, Skill, ModelCall.
+Infrastructure: SettingsLayer, Agent, Skill, ModelCall, BudgetHold.
 Approvals, learning traces and memory arrive in later phases.
 """
 
@@ -304,4 +304,18 @@ class ModelCall(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     ok: Mapped[bool] = mapped_column(default=True)
     error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class BudgetHold(Base):
+    """A paid model call's worst-case cost, held against its budgets while the call runs (§31), so a concurrent
+    call's budget check counts it (app/gateway/service.py). The call's ModelCall row replaces it; one left by a
+    process that stopped mid-call stops counting after HOLD_TTL there."""
+
+    __tablename__ = "budget_holds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    usd: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

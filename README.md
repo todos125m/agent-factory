@@ -157,7 +157,9 @@ which question comes next and how answers become a blueprint are pure code. The 
 
 Agents and skills are defined as files in `registry/` and synced at startup.
 Model calls go through `app/gateway` (role → provider/model from settings, budget check first,
-every call logged with tokens and cost). `app/context.py` builds the smallest prompt a call needs.
+every call logged with tokens and cost). A paid call's worst-case cost is held against its budgets while it
+runs, so calls in flight at the same time can't together pass a budget; nothing (no transaction, no SQLite write
+lock) stays open while a model runs. `app/context.py` builds the smallest prompt a call needs.
 
 ### Model access
 

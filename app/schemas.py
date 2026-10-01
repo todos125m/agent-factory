@@ -9,8 +9,8 @@ from app.models import MemoryCategory, Mode, ProjectStage, RiskLevel, SettingsSc
 from app.registry import MODEL_ROLES
 from app.settings_layers import MODEL_ACCESS_PROVIDERS
 
-# A USD limit for the budget gate, which blocks a call once `spent + estimate > limit`
-# (app/gateway/service.py::_check_budget). NaN and Infinity (Python's JSON parser accepts both) and
+# A USD limit for the budget gate, which blocks a call once `spent + in flight + estimate > limit`
+# (app/gateway/service.py::_hold_budget). NaN and Infinity (Python's JSON parser accepts both) and
 # absurd finite values such as 1e300 make that comparison never true, silently switching the gate off.
 MAX_BUDGET_USD = 10_000
 Usd = Annotated[float, Field(strict=True, ge=0, le=MAX_BUDGET_USD, allow_inf_nan=False)]

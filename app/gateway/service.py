@@ -1,10 +1,15 @@
-"""Model gateway: role → provider/model routing, budget checks, token and cost logging (§29–§31)."""
+"""Model gateway: role → provider/model routing, budget checks, token and cost logging (§29–§31).
+
+Nothing stays open while a model runs: Gateway.call commits before the provider call, so no transaction, and on
+SQLite no database-wide write lock, spans it; the owner's pause and every other write go through meanwhile.
+"""
 
 import math
 import time
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app import settings_layers
@@ -18,12 +23,16 @@ from app.gateway.providers import (
     WebSearchConfig,
     default_providers,
 )
-from app.models import ModelCall, Task
+from app.models import BudgetHold, ModelCall, Project, Task, utcnow
 from app.pause import refuse_if_paused
 
 # Hard ceiling regardless of settings (owner's directive): a misconfigured or malicious settings
 # layer must never grant an agent more than this many searches per call.
 WEB_SEARCH_HARD_CEILING = 10
+
+# A budget hold older than this belongs to a call that never finished (its process stopped mid-call) and no
+# longer counts: longer than any provider's own timeout (the Anthropic and OpenAI SDKs give up after 10 minutes).
+HOLD_TTL = timedelta(minutes=30)
 
 
 class BudgetExceeded(RuntimeError):
@@ -31,11 +40,26 @@ class BudgetExceeded(RuntimeError):
 
 
 def spent_usd(session: Session, *, project_id: int | None = None, task_id: int | None = None) -> float:
+    """Cost of the calls logged so far."""
     query = select(func.coalesce(func.sum(ModelCall.cost_usd), 0.0))
     if task_id is not None:
         query = query.where(ModelCall.task_id == task_id)
     elif project_id is not None:
         query = query.where(ModelCall.project_id == project_id)
+    return float(session.scalar(query) or 0.0)
+
+
+def held_usd(
+    session: Session, *, project_id: int | None = None, task_id: int | None = None, excluding: int | None = None
+) -> float:
+    """Worst-case cost of the paid calls still in flight (their BudgetHold rows)."""
+    query = select(func.coalesce(func.sum(BudgetHold.usd), 0.0)).where(BudgetHold.created_at > utcnow() - HOLD_TTL)
+    if task_id is not None:
+        query = query.where(BudgetHold.task_id == task_id)
+    elif project_id is not None:
+        query = query.where(BudgetHold.project_id == project_id)
+    if excluding is not None:
+        query = query.where(BudgetHold.id != excluding)
     return float(session.scalar(query) or 0.0)
 
 
@@ -75,11 +99,6 @@ class Gateway:
         budget = settings["budget"]
         max_out = int(budget["max_output_tokens"])
 
-        if not getattr(provider, "free", False):
-            # Worst case for this call: all input uncached, all output tokens used.
-            estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
-            self._check_budget(project_id, task_id, budget, estimate)
-
         web_search = None
         if tools and "web_search" in tools:
             if not (permissions or {}).get("network"):
@@ -102,6 +121,13 @@ class Gateway:
             effort=route.get("effort"),
             web_search=web_search,
         )
+        hold_id = None
+        if not getattr(provider, "free", False):
+            # Worst case for this call: all input uncached, all output tokens used.
+            estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
+            hold_id = self._hold_budget(project_id, task_id, budget, estimate)
+        # The hold, and anything the caller flushed, is committed now: nothing stays open while the model runs.
+        self.session.commit()
         started = time.monotonic()
         call = ModelCall(
             project_id=project_id, task_id=task_id, agent=agent, role=role,
@@ -112,8 +138,7 @@ class Gateway:
         except Exception as e:
             call.ok, call.error = False, str(e)[:500]
             call.duration_ms = int((time.monotonic() - started) * 1000)
-            self.session.add(call)
-            self.session.commit()
+            self._log(call, hold_id)
             raise
         u = response.usage
         call.input_tokens, call.output_tokens = u.input_tokens, u.output_tokens
@@ -124,30 +149,56 @@ class Gateway:
             else cost_usd(route["model"], u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens)
         )
         call.duration_ms = int((time.monotonic() - started) * 1000)
-        self.session.add(call)
-        self.session.commit()
+        self._log(call, hold_id)
         # Backfill what the caller can't otherwise get without re-querying ModelCall (racy under
         # concurrent calls, e.g. the benchmark tab comparing routes).
         response.cost_usd = call.cost_usd
         response.duration_ms = call.duration_ms
         return response
 
-    def _check_budget(self, project_id: int | None, task_id: int | None, budget: dict[str, Any], estimate: float) -> None:
+    def _log(self, call: ModelCall, hold_id: int | None) -> None:
+        """Log the call; its ModelCall row replaces its budget hold in the same commit."""
+        if hold_id is not None:
+            self.session.execute(delete(BudgetHold).where(BudgetHold.id == hold_id))
+        self.session.add(call)
+        self.session.commit()
+
+    def _hold_budget(
+        self, project_id: int | None, task_id: int | None, budget: dict[str, Any], estimate: float
+    ) -> int | None:
+        """Check this call's worst case against its budgets, counting the paid calls still in flight, and hold it
+        while the call runs so the next check counts it too (§31). Checks in one project queue: the hold is
+        written before anything is read (SQLite: that takes the write lock), and the project row is locked FOR NO
+        KEY UPDATE (PostgreSQL; like app/pause.py's lock, it doesn't conflict with foreign keys' KEY SHARE). On
+        a refusal nothing is held: `budget.exceeded` is recorded and BudgetExceeded raised."""
+        if project_id is None and task_id is None:
+            return None  # no budget to check against: the benchmark caps its own spend
+        hold = BudgetHold(project_id=project_id, task_id=task_id, usd=estimate)
+        self.session.add(hold)
+        self.session.flush()
+        if project_id is not None:
+            self.session.execute(select(Project.id).where(Project.id == project_id).with_for_update(key_share=True))
         checks = []
         if task_id is not None:
-            checks.append(("task", spent_usd(self.session, task_id=task_id), float(budget["task_usd"])))
+            checks.append(("task", {"task_id": task_id}, float(budget["task_usd"])))
         if project_id is not None:
-            checks.append(("project", spent_usd(self.session, project_id=project_id), float(budget["project_usd"])))
-        for scope, spent, limit in checks:
-            # Fail closed, like WEB_SEARCH_HARD_CEILING: NaN/inf make `spent + estimate > limit` never
-            # true. PUT /settings and ProjectCreate reject such limits; this guards rows stored before that.
+            checks.append(("project", {"project_id": project_id}, float(budget["project_usd"])))
+        for scope, key, limit in checks:
+            spent = spent_usd(self.session, **key)
+            held = held_usd(self.session, **key, excluding=hold.id)
+            # Fail closed, like WEB_SEARCH_HARD_CEILING: NaN/inf make `... > limit` never true. PUT /settings
+            # and ProjectCreate reject such limits; this guards rows stored before that.
             finite = math.isfinite(limit)
-            if not finite or spent + estimate > limit:
+            if not finite or spent + held + estimate > limit:
+                self.session.delete(hold)
                 if project_id is not None:
                     record_event(self.session, project_id, "budget.exceeded", task_id, scope=scope,
-                                 spent_usd=round(spent, 4), limit_usd=limit if finite else str(limit))
-                    self.session.commit()
+                                 spent_usd=round(spent, 4), in_flight_usd=round(held, 4),
+                                 limit_usd=limit if finite else str(limit))
+                self.session.commit()
+                in_flight = f", ${held:.4f} more in flight" if held else ""
                 raise BudgetExceeded(
-                    f"{scope} budget ${limit} would be exceeded (spent ${spent:.4f})" if finite
+                    f"{scope} budget ${limit} would be exceeded (spent ${spent:.4f}{in_flight})" if finite
                     else f"{scope} budget is not a finite number ({limit}); fix it in the settings"
                 )
+        return hold.id
