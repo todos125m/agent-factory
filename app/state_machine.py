@@ -35,7 +35,7 @@ class ProjectPaused(TransitionError):
 
 def check_project_active(paused: bool) -> None:
     """A project can be paused at any stage (§40); while paused no task moves to READY/RUNNING and no
-    model call is made (app/manager.py::ensure_active applies this and records the refusal)."""
+    model call is made (app/pause.py::refuse_if_paused applies this and records the refusal)."""
     if paused:
         raise ProjectPaused("Project is paused")
 

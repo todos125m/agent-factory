@@ -18,7 +18,8 @@ from app.gateway.providers import (
     WebSearchConfig,
     default_providers,
 )
-from app.models import ModelCall
+from app.models import ModelCall, Task
+from app.pause import refuse_if_paused
 
 # Hard ceiling regardless of settings (owner's directive): a misconfigured or malicious settings
 # layer must never grant an agent more than this many searches per call.
@@ -57,6 +58,13 @@ class Gateway:
         json_schema: dict[str, Any] | None = None,
         route: dict[str, Any] | None = None,
     ) -> ModelResponse:
+        if project_id is None and task_id is not None:
+            # A task's call belongs to its project: pause check, settings, budget and ModelCall alike.
+            task = self.session.get(Task, task_id)
+            project_id = task.project_id if task is not None else None
+        if project_id is not None:
+            # Backstop for a path that skipped app/manager.py::ensure_active: no model call while paused.
+            refuse_if_paused(self.session, project_id, "model_call", task_id, role=role, agent=agent)
         settings = settings_layers.resolve(self.session, project_id=project_id, task_id=task_id)
         route = route or settings["models"].get(role)
         if route is None:

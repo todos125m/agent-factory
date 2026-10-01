@@ -12,6 +12,7 @@ from app import sources
 from app.db import Base, SessionLocal, engine
 from app.registry import sync_from_files
 from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
+from app.state_machine import TransitionError
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -38,6 +39,13 @@ async def request_validation_error(_: Request, exc: RequestValidationError) -> J
     echoed as text: the default handler can't serialize it and answered 500 instead."""
     detail = jsonable_encoder(exc.errors(), custom_encoder=_NON_FINITE_AS_TEXT)
     return JSONResponse(status_code=422, content={"detail": detail})
+
+
+@app.exception_handler(TransitionError)
+async def transition_error(_: Request, exc: TransitionError) -> JSONResponse:
+    """409 on any route, as the routers that map it themselves answer: incl. the gateway's ProjectPaused
+    (app/pause.py) on a path that neither checked the pause nor maps the refusal, instead of a 500."""
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 app.include_router(users.router)

@@ -13,7 +13,8 @@ from app import context, memory, settings_layers, sources
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
-from app.state_machine import ProjectPaused, TransitionError, check_project_active, check_task_transition
+from app.pause import refuse_if_paused
+from app.state_machine import TransitionError, check_task_transition
 
 
 class ManagerError(ValueError):
@@ -21,15 +22,9 @@ class ManagerError(ValueError):
 
 
 def ensure_active(session: Session, project: Project, action: str, task_id: int | None = None, **detail: Any) -> None:
-    """The pause policy (check_project_active), applied in one place: every entry point that would spend a
-    model call or move a task to READY/RUNNING calls this before changing anything. A refusal is recorded
-    (like `budget.exceeded`) so the owner can see what the pause stopped; routers answer it with 409."""
-    try:
-        check_project_active(project.paused)
-    except ProjectPaused:
-        record_event(session, project.id, "pause.blocked", task_id, action=action, **detail)
-        session.commit()
-        raise
+    """The pause policy (app/pause.py) at every entry point that would spend a model call or move a task to
+    READY/RUNNING, called before changing anything; routers answer the refusal with 409."""
+    refuse_if_paused(session, project.id, action, task_id, **detail)
 
 
 def _paused_now(session: Session, project: Project) -> bool:
@@ -252,7 +247,8 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
 
 
 def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
-    # Refused before deleting anything: the router re-plans right after, which a pause refuses too.
+    # Refused before deleting anything, and not committed here: the router re-plans right after in the same
+    # session, so a pause that refuses the re-plan rolls the rejection back instead of deleting it for nothing.
     ensure_active(session, project, "plan.reject")
     last_plan = session.scalar(
         select(RunEvent)
@@ -268,7 +264,6 @@ def reject_plan(session: Session, project: Project, feedback: str) -> list[int]:
     for t in tasks:
         session.delete(t)
     record_event(session, project.id, "decision.plan_rejected", None, feedback=feedback, deleted_task_ids=deleted_ids)
-    session.commit()
     return deleted_ids
 
 

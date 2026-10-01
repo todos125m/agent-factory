@@ -3,7 +3,7 @@ import pytest
 from app.context import ContextError, agent_directory, system_prompt, task_context
 from app.gateway.providers import FakeProvider, ProviderError
 from app.gateway.service import BudgetExceeded, Gateway, spent_usd
-from app.models import Agent, ModelCall, Project, Task, TaskDependency, User
+from app.models import Agent, ModelCall, Project, RunEvent, Task, TaskDependency, User
 from app.registry import AgentSpec, RegistryError, upsert_agent
 from app.settings_layers import resolve
 
@@ -116,6 +116,23 @@ def test_budget_blocks_the_call_and_records_event(session, client):
     assert fake.requests == []  # nothing was sent
     events = client.get(f"/projects/{project.id}/events").json()
     assert events[-1]["type"] == "budget.exceeded"
+
+
+def test_a_call_naming_only_its_task_counts_against_the_tasks_project(session):
+    project = make_project(session)
+    task = Task(project_id=project.id, title="t")
+    session.add(task)
+    session.commit()
+    gw, fake = use_fake(session, replies=[{"steps": []}])
+
+    gw.call("manager", system="s", user="u", task_id=task.id)
+    assert session.query(ModelCall).one().project_id == project.id
+    project.budget = 0.000001
+    session.commit()
+    with pytest.raises(BudgetExceeded):
+        gw.call("manager", system="s", user="u", task_id=task.id)
+    assert len(fake.requests) == 1
+    assert [e.payload["scope"] for e in session.query(RunEvent).filter_by(type="budget.exceeded")] == ["project"]
 
 
 def test_list_model_calls_for_a_project(session, client):

@@ -2,21 +2,30 @@
 approve, reject, checkpoint (incl. automatic mode's auto-decide), decide, run, chat — not only on the
 transition endpoint. A refusal is HTTP 409 plus a `pause.blocked` event; a pause that lands while a
 model call is in flight keeps the paid-for result but withholds its READY/RUNNING moves
-(`pause.withheld`), and resuming releases withheld dependency promotions. FakeProvider only.
+(`pause.withheld`), and resuming releases withheld dependency promotions. Gateway.call refuses a paused
+project's model call itself too, for a path that skips the manager's check. FakeProvider only.
 """
 
 import pytest
 
+from app import manager
 from app.gateway.providers import FakeProvider
 from app.gateway.service import Gateway
 from app.main import app
+from app.models import ModelCall, Project, Task
 from app.routers.manager import get_gateway
 from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
+from app.state_machine import ProjectPaused
 from tests.test_manager import CHECKPOINT, _ready_task
 from tests.test_task_run import PLAN, RUN_RESULT
 
 CHAT_REPLY = {"reply": "On track.", "suggested_action": "none"}
+ROUTE = {"provider": "fake", "model": "claude-opus-5"}
+
+
+def _route_to_fake(client):
+    client.put("/settings/global/0", json={"models": {"manager": ROUTE, "research": ROUTE}})
 
 
 def use_provider(client, session_factory, provider):
@@ -27,8 +36,14 @@ def use_provider(client, session_factory, provider):
             yield Gateway(s, providers={"fake": provider})
 
     app.dependency_overrides[get_gateway] = override
-    route = {"provider": "fake", "model": "claude-opus-5"}
-    client.put("/settings/global/0", json={"models": {"manager": route, "research": route}})
+    _route_to_fake(client)
+    return provider
+
+
+def use_real_gateway(client, monkeypatch, provider):
+    """Like use_provider, but through the real get_gateway (no override), as in production."""
+    monkeypatch.setattr("app.gateway.service.default_providers", lambda: {"fake": provider})
+    _route_to_fake(client)
     return provider
 
 
@@ -193,6 +208,153 @@ def test_transition_and_stage_refusals_go_through_the_same_check(client, project
     _assert_refused(client, pid, client.post(f"/projects/{pid}/stage", json={"stage": "DISCOVERY"}), "stage")
     # A move that starts nothing is still allowed while paused, as before.
     assert client.post(f"/projects/{pid}/tasks/{t['id']}/transition", json={"status": "CANCELLED"}).status_code == 200
+
+
+# ---------- the gateway itself: a backstop for a path that skips ensure_active ----------
+
+
+def test_gateway_refuses_a_paused_projects_call_before_the_provider(client, session, project):
+    """A direct Gateway.call, as from a path that never ran ensure_active. `paused` is read fresh, not
+    from a Project this session loaded before the owner paused in another session."""
+    pid = project["id"]
+    t = client.post(f"/projects/{pid}/tasks", json={"title": "T"}).json()
+    loaded = session.get(Project, pid)  # like a router's load_project, before the pause
+    _pause(client, pid)
+    assert loaded.paused is False  # this session's copy is stale
+    fake = FakeProvider(replies=[{"ok": True}])
+    gw = Gateway(session, providers={"fake": fake})
+
+    with pytest.raises(ProjectPaused, match="Project is paused"):
+        gw.call("research", system="s", user="u", project_id=pid, task_id=t["id"], agent="researcher", route=ROUTE)
+    assert fake.requests == [] and _model_calls(client, pid) == 0
+    last = _events(client, pid)[-1]
+    assert (last["type"], last["task_id"], last["payload"]) == (
+        "pause.blocked", t["id"], {"action": "model_call", "role": "research", "agent": "researcher"},
+    )
+
+    _pause(client, pid, False)
+    gw.call("research", system="s", user="u", project_id=pid, task_id=t["id"], agent="researcher", route=ROUTE)
+    assert len(fake.requests) == 1 and _model_calls(client, pid) == 1
+
+
+def test_gateway_refuses_a_task_scoped_call_that_names_no_project(client, session, project):
+    pid = project["id"]
+    t = client.post(f"/projects/{pid}/tasks", json={"title": "T"}).json()
+    _pause(client, pid)
+    fake = FakeProvider()
+
+    with pytest.raises(ProjectPaused):
+        Gateway(session, providers={"fake": fake}).call("research", system="s", user="u", task_id=t["id"], route=ROUTE)
+    assert fake.requests == [] and session.query(ModelCall).count() == 0
+    last = _events(client, pid)[-1]
+    assert (last["type"], last["task_id"], last["payload"]["action"]) == ("pause.blocked", t["id"], "model_call")
+
+
+def test_a_refusal_never_points_at_a_task_its_rollback_removed(client, session, project):
+    """A task staged in the refused path's own uncommitted work is rolled back with it, so the event must not
+    reference it (on PostgreSQL that foreign key would turn the 409 into a 500 with nothing recorded)."""
+    pid = project["id"]
+    _pause(client, pid)
+    staged = Task(project_id=pid, title="staged")
+    session.add(staged)
+    session.flush()
+    gw = Gateway(session, providers={"fake": FakeProvider()})
+
+    with pytest.raises(ProjectPaused):
+        gw.call("research", system="s", user="u", task_id=staged.id, route=ROUTE)
+    assert client.get(f"/projects/{pid}/tasks").json() == []
+    last = _events(client, pid)[-1]
+    assert (last["type"], last["task_id"], last["payload"]["action"]) == ("pause.blocked", None, "model_call")
+
+
+def test_gateway_still_calls_for_other_projects_and_without_a_project(client, session, project):
+    """Only the paused project is refused: an unpaused project and a project-less call go through."""
+    other = client.post("/projects", json={"owner_id": project["owner_id"], "title": "Other", "goal": "g"}).json()
+    _pause(client, project["id"])
+    fake = FakeProvider(replies=[{"n": 1}, {"n": 2}])
+    gw = Gateway(session, providers={"fake": fake})
+
+    assert gw.call("manager", system="s", user="u", project_id=other["id"], route=ROUTE).text == '{"n": 1}'
+    assert gw.call("manager", system="s", user="u", agent="benchmark", route=ROUTE).text == '{"n": 2}'
+    assert _model_calls(client, other["id"]) == 1 and session.query(ModelCall).count() == 2
+    assert "pause.blocked" not in {e["type"] for p in (project, other) for e in _events(client, p["id"])}
+
+
+def test_benchmark_runs_while_a_project_is_paused(client, session_factory, project):
+    """The benchmark tab's calls carry no project, so a paused project never blocks them."""
+    _pause(client, project["id"])
+    use_provider(client, session_factory, FakeProvider(replies=[PLAN]))
+    r = client.post("/benchmarks/run", json={"routes": [ROUTE]})
+    assert r.status_code == 200, r.text
+    assert (r.json()[0]["schema_valid"], r.json()[0]["error"]) == (True, None)
+    app.dependency_overrides.pop(get_gateway, None)
+
+
+@pytest.mark.parametrize("path, setup, reply", [
+    ("plan", None, PLAN),
+    ("tasks/{tid}/checkpoint", _ready_task, CHECKPOINT),
+    ("tasks/{tid}/run", _running_task, RUN_RESULT),
+    ("chat", None, CHAT_REPLY),
+], ids=["plan", "checkpoint", "run", "chat"])
+def test_a_path_that_skips_ensure_active_is_still_refused(client, project, monkeypatch, path, setup, reply):
+    """A new project-scoped path that forgets ensure_active: the gateway refuses its model call, the router
+    answers 409 as for any pause refusal, and nothing the path had started is kept."""
+    pid = project["id"]
+    tid = setup(client, pid)["id"] if setup else None
+    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[reply]))
+    monkeypatch.setattr("app.manager.ensure_active", lambda *a, **kw: None)
+    monkeypatch.setattr("app.chat.ensure_active", lambda *a, **kw: None)
+    tasks = client.get(f"/projects/{pid}/tasks").json()
+    _pause(client, pid)
+
+    r = client.post(f"/projects/{pid}/{path.format(tid=tid)}", json={"text": "status?"} if path == "chat" else None)
+    _assert_refused(client, pid, r, "model_call", tid)
+    assert fake.requests == []
+    assert client.get(f"/projects/{pid}/tasks").json() == tasks
+    assert client.get(f"/projects/{pid}/chat").json() == []  # chat's already-flushed message is dropped too
+
+
+def test_a_route_that_does_not_map_the_refusal_still_answers_409(client, project, monkeypatch):
+    """A path that neither checks the pause nor maps the refusal (no _run): app/main.py answers 409, not 500."""
+    pid = project["id"]
+    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN]))
+    monkeypatch.setattr("app.manager.ensure_active", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.manager._run", lambda fn, *a, **kw: fn(*a, **kw))
+    _pause(client, pid)
+
+    _assert_refused(client, pid, client.post(f"/projects/{pid}/plan"), "model_call")
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize("skip_ensure_active, refused_by", [(False, "plan"), (True, "model_call")],
+                         ids=["entry_check", "gateway"])
+def test_a_pause_landing_mid_reject_keeps_the_plan(
+    client, session_factory, project, monkeypatch, skip_ensure_active, refused_by
+):
+    """Reject and re-plan are one unit: when the owner pauses right after the rejection is staged, the
+    re-plan is refused (by its entry check, or by the gateway on a path that skips it) and the rejection is
+    rolled back with it — the plan is not deleted for nothing."""
+    pid = project["id"]
+    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, PLAN]))
+    client.post(f"/projects/{pid}/plan")
+    tasks = client.get(f"/projects/{pid}/tasks").json()
+    reject_plan = manager.reject_plan
+
+    def reject_then_the_owner_pauses(session, project, feedback):
+        deleted = reject_plan(session, project, feedback)
+        with session_factory() as s:  # the owner's pause request, in its own session
+            set_paused(pid, ProjectPauseUpdate(paused=True), session=s)
+        return deleted
+
+    monkeypatch.setattr("app.manager.reject_plan", reject_then_the_owner_pauses)
+    if skip_ensure_active:
+        monkeypatch.setattr("app.manager.ensure_active", lambda *a, **kw: None)
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    _assert_refused(client, pid, r, refused_by, calls_before=1)
+    assert len(fake.requests) == 1
+    assert client.get(f"/projects/{pid}/tasks").json() == tasks
+    assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
 
 
 # ---------- unpaused happy path: after a resume nothing is stuck ----------
