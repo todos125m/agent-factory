@@ -8,11 +8,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Agent, Skill
+from app.storable import Int32, StorableIn, limit
 
 REGISTRY_DIR = Path(__file__).resolve().parent.parent / "registry"
 
@@ -25,9 +26,9 @@ class RegistryError(ValueError):
     pass
 
 
-class AgentSpec(BaseModel):
-    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,99}$")
-    version: int = 1
+class AgentSpec(StorableIn):
+    name: str = Field(max_length=limit(Agent, "name"), pattern=r"^[a-z][a-z0-9_-]{1,99}$")
+    version: Int32 = 1  # Agent.version is a 32-bit INTEGER on PostgreSQL
     description: str
     model_role: str
     capabilities: list[str] = Field(min_length=1)
@@ -51,6 +52,13 @@ class AgentSpec(BaseModel):
         return v
 
 
+class SkillSpec(StorableIn):
+    name: str = Field(max_length=limit(Skill, "name"))
+    version: Int32 = 1  # Skill.version is a 32-bit INTEGER on PostgreSQL
+    summary: str = Field(max_length=limit(Skill, "summary"))
+    body: str
+
+
 def parse_skill_file(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
@@ -58,7 +66,13 @@ def parse_skill_file(path: Path) -> dict[str, Any]:
     head, body = text[4:].split("\n---\n", 1)
     meta = dict(line.split(":", 1) for line in head.strip().splitlines())
     meta = {k.strip(): v.strip() for k, v in meta.items()}
-    return {"name": meta["name"], "version": int(meta.get("version", 1)), "summary": meta["summary"], "body": body.strip()}
+    try:  # PostgreSQL refuses a longer name or summary (SQLite doesn't): say which file, at startup, not mid-sync
+        skill = SkillSpec(name=meta["name"], version=int(meta.get("version", 1)), summary=meta["summary"], body=body.strip())
+    except ValidationError as e:
+        raise RegistryError(
+            f"{path.name}: " + "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors())
+        ) from e
+    return skill.model_dump()
 
 
 def validate_agent(session: Session, spec: AgentSpec, *, updating: bool = False) -> None:

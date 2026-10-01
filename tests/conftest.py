@@ -7,6 +7,10 @@ from sqlalchemy.pool import QueuePool, StaticPool
 from app.db import Base, SessionLocal, get_session, make_engine
 from app.main import app
 from app.registry import sync_from_files
+from tests import postgres_limits
+
+# SQLite stores what PostgreSQL (production) refuses: from here on every engine of every test refuses it too.
+postgres_limits.install()
 
 
 @pytest.fixture

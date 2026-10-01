@@ -36,11 +36,11 @@ def _run(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         raise HTTPException(409, str(e)) from e
 
 
-class PlanReject(BaseModel):
+class PlanReject(storable.StorableIn):  # the owner's text, refused before the re-plan's paid call
     feedback: str
 
 
-class DecisionIn(BaseModel):
+class DecisionIn(storable.StorableIn):
     option: int
     note: str | None = None
 

@@ -5,9 +5,13 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, Va
 from pydantic_core import PydanticCustomError
 
 from app.gateway.service import WEB_SEARCH_HARD_CEILING
-from app.models import MemoryCategory, Mode, ProjectStage, RiskLevel, SettingsScope, TaskStatus
+from app.models import (
+    Feedback, MemoryCategory, MemoryItem, ModelCall, Mode, Project, ProjectStage, RiskLevel, SettingsScope, Task,
+    TaskStatus, User, Workspace,
+)
 from app.registry import MODEL_ROLES
 from app.settings_layers import MODEL_ACCESS_PROVIDERS
+from app.storable import INT32_MAX, Int32, StorableIn, limit
 
 # A USD limit for the budget gate, which blocks a call once `spent + in flight + estimate > limit`
 # (app/gateway/service.py::_hold_budget). NaN and Infinity (Python's JSON parser accepts both) and
@@ -20,9 +24,12 @@ class ORM(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserCreate(BaseModel):
-    email: str
-    name: str | None = None
+# Request bodies are StorableIn (app/storable.py): what can't be stored (NUL, a lone surrogate, NaN inside a JSON
+# object) is a 422 naming the field. A String(n) field declares its column's own length: PostgreSQL refuses a longer
+# value (SQLite doesn't), so the store would fail with a 500 on every retry; here it is a 422 before anything is written.
+class UserCreate(StorableIn):
+    email: str = Field(max_length=limit(User, "email"))
+    name: str | None = Field(default=None, max_length=limit(User, "name"))
 
 
 class UserOut(ORM):
@@ -32,10 +39,10 @@ class UserOut(ORM):
     created_at: datetime
 
 
-class ProjectCreate(BaseModel):
+class ProjectCreate(StorableIn):
     owner_id: int
     workspace_id: int | None = None
-    title: str
+    title: str = Field(max_length=limit(Project, "title"))
     goal: str
     mode: Mode = Mode.AUTOMATIC
     budget: Usd | None = None  # feeds the resolved budget.project_usd (app/settings_layers.py::resolve)
@@ -62,16 +69,16 @@ class ProjectPauseUpdate(BaseModel):
     paused: bool
 
 
-class TaskCreate(BaseModel):
-    title: str
-    owner: str | None = None
+class TaskCreate(StorableIn):
+    title: str = Field(max_length=limit(Task, "title"))
+    owner: str | None = Field(default=None, max_length=limit(Task, "owner"))
     input: dict[str, Any] = Field(default_factory=dict)
     depends_on: list[int] = Field(default_factory=list)
     budget: float | None = None
-    priority: int = 0
+    priority: Int32 = 0
     risk: RiskLevel = RiskLevel.LOW
     mode: Mode | None = None
-    max_retries: int = Field(default=2, ge=0)
+    max_retries: int = Field(default=2, ge=0, le=INT32_MAX)  # Task.max_retries is a 32-bit INTEGER on PostgreSQL
 
 
 class TaskOut(ORM):
@@ -93,7 +100,7 @@ class TaskOut(ORM):
     updated_at: datetime
 
 
-class TaskTransition(BaseModel):
+class TaskTransition(StorableIn):
     status: TaskStatus
     output: dict[str, Any] | None = None
     reason: str | None = None
@@ -113,8 +120,8 @@ class RunEventOut(ORM):
     created_at: datetime
 
 
-class WorkspaceCreate(BaseModel):
-    name: str
+class WorkspaceCreate(StorableIn):
+    name: str = Field(max_length=limit(Workspace, "name"))
 
 
 class WorkspaceOut(ORM):
@@ -149,10 +156,14 @@ def _no_whitespace(value: str) -> str:
 # Shape only: provider names are whatever the Gateway was built with (tests register their own), so
 # an unregistered one is reported by Gateway.call ("unknown provider ...") when the role is used.
 ProviderName = Annotated[str, Field(strict=True, min_length=1, max_length=64), AfterValidator(_no_whitespace)]
-ModelId = Annotated[str, Field(strict=True, min_length=1, max_length=200), AfterValidator(_no_whitespace)]
+# Every call is logged with its model id (ModelCall.model), after the call has been paid for: a longer id would be
+# refused by PostgreSQL there, and the call would go unrecorded and uncounted against the budget.
+ModelId = Annotated[
+    str, Field(strict=True, min_length=1, max_length=limit(ModelCall, "model")), AfterValidator(_no_whitespace)
+]
 
 
-class _LayerPart(BaseModel):
+class _LayerPart(StorableIn):
     """A settings layer stores only the keys it overrides: every field here is optional (absent =
     inherit from the layer above) and nested dicts may be partial, but a key that is sent must hold a
     valid value, and null is not "inherit". Unknown keys are rejected, since consumers ignore them."""
@@ -257,11 +268,11 @@ class ChatTurnOut(BaseModel):
     manager: ChatMessageOut
 
 
-class FeedbackIn(BaseModel):
+class FeedbackIn(StorableIn):
     project_id: int
     task_id: int | None = None
-    agent: str
-    rating: str = Field(pattern=r"^(up|down)$")
+    agent: str = Field(max_length=limit(Feedback, "agent"))
+    rating: str = Field(pattern=r"^(up|down)$")  # fits Feedback.rating
     note: str | None = None
 
 
@@ -296,9 +307,9 @@ class UsageOut(BaseModel):
     budget_usd: float
 
 
-class MemoryItemCreate(BaseModel):
+class MemoryItemCreate(StorableIn):
     category: MemoryCategory
-    title: str = Field(max_length=300)  # matches MemoryItem.title's String(300) column
+    title: str = Field(max_length=limit(MemoryItem, "title"))
     content: str
     task_id: int | None = None
 

@@ -47,6 +47,23 @@ PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gi
 Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
 (see `.env.example`).
 
+### SQLite vs PostgreSQL: what a column refuses
+
+SQLite stores any string in a `VARCHAR(n)` and any integer in an `INTEGER`; PostgreSQL (production) refuses what
+doesn't fit: a 500 at the store, after the paid model call when the text came from a model, and again (paid again) on
+every retry. So every value that reaches a column is checked against that column's own limit first
+(`app/storable.py`): a request body is a `StorableIn` and a bad field is a 422 naming it (longer than its column,
+a NUL or lone surrogate, NaN/Infinity inside a JSON object, an integer beyond 32 bits); a model's reply is a
+`StorableOut` plus length validators on the classes whose text lands in a column; `limit(Model, "column")` is the one
+place a limit is read from. `tests/postgres_limits.py` makes the suite's SQLite refuse what PostgreSQL refuses (every
+test, every engine), and `tests/test_column_limits.py` audits every `String(n)` column — a new one fails the suite
+until its writers are classified. `AGENT_FACTORY_TEST_PG_URL=postgresql+psycopg://… pytest tests/test_postgres_parity.py`
+re-checks all of it against a real server (each test in a schema of its own, dropped afterwards).
+
+There are no migrations yet (`create_all` only creates missing tables), so a column widened later is widened in an
+existing PostgreSQL database at startup by `app/db.py::ensure_column_lengths` — like `ensure_indexes`: idempotent,
+widen-only, never shrinking.
+
 ## Run with Docker
 
 ```bash

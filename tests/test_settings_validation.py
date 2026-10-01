@@ -8,11 +8,12 @@ import pytest
 
 from app.gateway.service import WEB_SEARCH_HARD_CEILING
 from app.main import app
-from app.models import RiskLevel, SettingsLayer, SettingsScope
+from app.models import Project, RiskLevel, SettingsLayer, SettingsScope
 from app.registry import MODEL_ROLES
 from app.routers.manager import get_gateway
 from app.schemas import MAX_BUDGET_USD, ApprovalsLayer, BudgetLayer, ContextLayer, ModelRouteLayer, SettingsLayerIn
 from app.settings_layers import DEFAULTS
+from tests import postgres_limits
 from tests.test_manager import CHECKPOINT, GOOD_PLAN, _ready_task, register_researcher, use_fake
 
 REJECTED = [
@@ -217,11 +218,23 @@ def test_approval_typo_can_no_longer_let_a_high_risk_step_auto_decide(client, se
     app.dependency_overrides.pop(get_gateway, None)
 
 
-@pytest.mark.parametrize("limit", [float("nan"), float("inf")])
-def test_stored_non_finite_budget_fails_closed(client, session_factory, session, project, limit):
-    """A row stored before PUT validated values (inserted directly here) must not switch the gate off."""
-    session.add(SettingsLayer(scope=SettingsScope.PROJECT, scope_id=project["id"], values={"budget": {"project_usd": limit}}))
-    session.commit()
+@pytest.mark.parametrize("limit, where", [
+    (float("nan"), "settings layer"), (float("inf"), "settings layer"),
+    (float("inf"), "project column"),  # (NaN here would be stored as NULL: that is SQLite's way with NaN)
+])
+def test_stored_non_finite_budget_fails_closed(client, session_factory, session, project, limit, where):
+    """A row stored before PUT / POST /projects validated values (written directly here) must not switch the gate off.
+    Only a SQLite database can hold the settings-layer one (PostgreSQL's json has always refused NaN and Infinity);
+    projects.budget is a double precision column, which takes both."""
+    if where == "settings layer":
+        with postgres_limits.unenforced():
+            session.add(SettingsLayer(
+                scope=SettingsScope.PROJECT, scope_id=project["id"], values={"budget": {"project_usd": limit}}
+            ))
+            session.commit()
+    else:
+        session.get(Project, project["id"]).budget = limit
+        session.commit()
     register_researcher(client)
     fake = use_fake(client, session_factory, [GOOD_PLAN])
     r = client.post(f"/projects/{project['id']}/plan")

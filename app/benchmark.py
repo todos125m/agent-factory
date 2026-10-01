@@ -7,7 +7,7 @@ run sequentially and a real network/SDK failure on one route must never abort th
 broad `except Exception` in `run_one`, scoped to a single route's call only.
 """
 
-from pydantic import BaseModel, ValidationError
+from pydantic import Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,10 +23,10 @@ BENCHMARK_GOAL = "Validate a SaaS idea for solo consultants who bill hourly clie
 BENCHMARK_BUDGET_USD = 2.0
 
 
-class RouteIn(BaseModel):
-    provider: str
-    model: str
-    effort: str | None = None
+class RouteIn(storable.StorableIn):  # each field is a BenchmarkRun column: PostgreSQL refuses a longer value
+    provider: str = Field(max_length=storable.limit(BenchmarkRun, "provider"))
+    model: str = Field(max_length=storable.limit(BenchmarkRun, "model"))
+    effort: str | None = Field(default=None, max_length=storable.limit(BenchmarkRun, "effort"))
 
 
 def _benchmark_spent(session: Session) -> float:

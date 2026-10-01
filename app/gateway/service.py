@@ -36,6 +36,10 @@ WEB_SEARCH_HARD_CEILING = 10
 # longer counts: it outlasts the longest a paid call can run (the SDK clients' pinned limits, MAX_CALL_S) by 10 min.
 HOLD_TTL = timedelta(seconds=MAX_CALL_S) + timedelta(minutes=10)
 
+# Every call is logged with its model id (ModelCall.model) once it has been paid for. PUT /settings refuses a longer
+# one, but a layer stored before it did can still hold one: such a route is refused before anything is held or paid.
+MAX_MODEL_ID_CHARS = storable.limit(ModelCall, "model")
+
 
 class BudgetExceeded(RuntimeError):
     """Raised before a call that could push spend over budget; the caller pauses for approval (§31)."""
@@ -99,6 +103,8 @@ class Gateway:
         provider = self.providers.get(route["provider"])
         if provider is None:
             raise ProviderError(f"unknown provider '{route['provider']}'")
+        if len(str(route["model"])) > MAX_MODEL_ID_CHARS:
+            raise ProviderError(f"the model id of role '{role}' is longer than {MAX_MODEL_ID_CHARS} characters; fix it in the settings")
         budget = settings["budget"]
         max_out = int(budget["max_output_tokens"])
 

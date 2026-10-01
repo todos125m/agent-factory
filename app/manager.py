@@ -36,6 +36,10 @@ def _paused_now(session: Session, project: Project) -> bool:
     return lock_project(session, project.id)
 
 
+# The columns a plan step's text lands in (a step becomes a Task): the step's own limits, from the columns themselves.
+_STEP_LIMITS = {"title": storable.limit(Task, "title"), "agent": storable.limit(Task, "owner")}
+
+
 class PlanStepIn(BaseModel):
     title: str
     agent: str
@@ -46,9 +50,9 @@ class PlanStepIn(BaseModel):
     @field_validator("title", "agent")
     @classmethod
     def _fits_its_column(cls, v: str, info: ValidationInfo) -> str:
-        """tasks.title is String(300) and tasks.owner String(100): PostgreSQL refuses a longer value, after the spend.
-        A validator, not Field(max_length), so the JSON schema sent to the provider stays as it was."""
-        limit = {"title": 300, "agent": 100}[info.field_name]
+        """PostgreSQL refuses a longer value than its column holds (SQLite doesn't), after the spend. A validator, not
+        Field(max_length), so the JSON schema sent to the provider stays as it was."""
+        limit = _STEP_LIMITS[info.field_name]
         if len(v) > limit:
             raise ValueError(f"{info.field_name} must be at most {limit} characters")
         return v

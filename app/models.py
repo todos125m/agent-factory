@@ -19,6 +19,11 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# A task's title is copied whole into MemoryItem.title and LearningTrace.concept when its run completes (app/memory.py),
+# after the paid call: a copy in a narrower column is refused by PostgreSQL (SQLite takes it), so all three are this long.
+TASK_TITLE_LENGTH = 300
+
+
 class Mode(str, enum.Enum):
     AUTOMATIC = "automatic"
     MANUAL_LEARNING = "manual_learning"
@@ -93,7 +98,7 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
-    title: Mapped[str] = mapped_column(String(300))
+    title: Mapped[str] = mapped_column(String(TASK_TITLE_LENGTH))
     owner: Mapped[str | None] = mapped_column(String(100))  # agent name from the registry (Phase 3)
     input: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     output: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -239,7 +244,7 @@ class MemoryItem(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     category: Mapped[MemoryCategory] = mapped_column(Enum(MemoryCategory))
-    title: Mapped[str] = mapped_column(String(300))
+    title: Mapped[str] = mapped_column(String(TASK_TITLE_LENGTH))  # a completed task's title, or the owner's own note's
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -253,7 +258,7 @@ class LearningTrace(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
-    concept: Mapped[str] = mapped_column(String(200))
+    concept: Mapped[str] = mapped_column(String(TASK_TITLE_LENGTH))  # the completed task's title (app/memory.py)
     explanation: Mapped[str] = mapped_column(Text)
     example: Mapped[str | None] = mapped_column(Text)
     related_decision: Mapped[str | None] = mapped_column(Text)

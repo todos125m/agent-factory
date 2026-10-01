@@ -1,6 +1,8 @@
+import json
 import math
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -9,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import sources
-from app.db import Base, SessionLocal, engine, ensure_indexes
+from app.db import Base, SessionLocal, engine, ensure_column_lengths, ensure_indexes
 from app.registry import sync_from_files
 from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
 from app.state_machine import ProjectPaused, TransitionError
@@ -22,6 +24,7 @@ async def lifespan(_: FastAPI):
     # Phase 1 convenience; switch to Alembic migrations once the schema settles.
     Base.metadata.create_all(engine)
     ensure_indexes(engine)
+    ensure_column_lengths(engine)
     with SessionLocal() as session:
         sync_from_files(session)
     sources.load_rules()  # fail fast on a broken registry/source_tiers.yaml, not mid task run
@@ -34,12 +37,21 @@ app = FastAPI(title="Agent Factory", version="0.2.0", lifespan=lifespan)
 _NON_FINITE_AS_TEXT = {float: lambda f: f if math.isfinite(f) else str(f)}
 
 
+class _AsciiJSONResponse(JSONResponse):
+    """JSON with every non-ASCII character escaped. A 422 echoes the input it refused, which may hold a lone surrogate
+    (pydantic refuses one in any str field): no UTF-8 body can carry it, so the default response raised and the 422 was
+    a 500. `\\ud83d` is valid JSON that reads back as the same text."""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(content, ensure_ascii=True, allow_nan=False, indent=None, separators=(",", ":")).encode("ascii")
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-    """FastAPI's default 422, except that a NaN/Infinity input (Python's JSON parser accepts both) is
-    echoed as text: the default handler can't serialize it and answered 500 instead."""
+    """FastAPI's default 422, except that a NaN/Infinity input (Python's JSON parser accepts both) is echoed as text
+    and a lone surrogate is escaped: the default handler can't serialize either and answered 500 instead."""
     detail = jsonable_encoder(exc.errors(), custom_encoder=_NON_FINITE_AS_TEXT)
-    return JSONResponse(status_code=422, content={"detail": detail})
+    return _AsciiJSONResponse(status_code=422, content={"detail": detail})
 
 
 @app.exception_handler(TransitionError)
