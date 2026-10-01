@@ -357,6 +357,22 @@ def test_a_pause_landing_mid_reject_keeps_the_plan(
     assert "decision.plan_rejected" not in {e["type"] for e in _events(client, pid)}
 
 
+def test_reject_and_replan_land_together_through_the_real_gateway(client, project, monkeypatch):
+    """reject_plan leaves the commit to the re-plan; with the gateway on the route's own session (as in
+    production) the rejection and the new plan both land."""
+    pid = project["id"]
+    fake = use_real_gateway(client, monkeypatch, FakeProvider(replies=[PLAN, {**PLAN, "understanding": "Revised"}]))
+    client.post(f"/projects/{pid}/plan")
+    old = {t["id"] for t in client.get(f"/projects/{pid}/tasks").json()}
+
+    r = client.post(f"/projects/{pid}/plan/reject", json={"feedback": "too shallow"})
+    assert r.status_code == 200 and r.json()["understanding"] == "Revised", r.text
+    assert len(client.get(f"/projects/{pid}/tasks").json()) == 2  # SQLite may reuse the deleted ids
+    rejected = [e for e in _events(client, pid) if e["type"] == "decision.plan_rejected"]
+    assert len(rejected) == 1 and set(rejected[0]["payload"]["deleted_task_ids"]) == old
+    assert len(fake.requests) == 2 and _model_calls(client, pid) == 2
+
+
 # ---------- unpaused happy path: after a resume nothing is stuck ----------
 
 
