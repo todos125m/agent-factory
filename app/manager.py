@@ -47,6 +47,11 @@ def _stamp(task: Task) -> tuple[TaskStatus, int]:
     return task.status, task.retries
 
 
+def _moved_on(fresh: Task | None, started_from: tuple[TaskStatus, int]) -> bool:
+    """Whether the task read again after a model call (None: gone) is no longer the one the call started from."""
+    return fresh is None or _stamp(fresh) != started_from
+
+
 def _record_moved_meanwhile(
     session: Session, project_id: int, task_id: int, action: str, was: TaskStatus, now: TaskStatus | None
 ) -> str:
@@ -375,7 +380,7 @@ def create_checkpoint(session: Session, gateway: Gateway, project: Project, task
             auto = False
         else:
             fresh = lock_task(session, task.id)
-            if fresh is None or _stamp(fresh) != started_from:
+            if _moved_on(fresh, started_from):
                 # Moved on while the call ran (cancelled, decided from another tab, put on hold): the decision was
                 # meant for the task the call found, so it is withheld too, and the owner decides.
                 now = None if fresh is None else fresh.status
@@ -448,7 +453,6 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     if task.status is not TaskStatus.RUNNING:
         raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
     check_task_move(session, task, TaskStatus.COMPLETED, dependency_statuses=[])
-    previous = task.status
     started_from = _stamp(task)
 
     if not task.owner:
@@ -475,14 +479,14 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     # write lock on SQLite) and the task is read again under it, so what happened to it during the call is seen before
     # it is changed. If it moved on, rolling back drops the staged result with the locks.
     record_event(session, project.id, "task.status_changed", task.id,
-                 **{"from": previous.value, "to": "COMPLETED", "reason": "task executed"})
+                 **{"from": started_from[0].value, "to": "COMPLETED", "reason": "task executed"})
     record_event(session, project.id, "task.completed", task.id, **result.model_dump())
     memory.capture_from_task_output(session, project, task, agent.name, result, mode=task_settings["mode"])
 
     # Locks the project row before flushing the result (see app/pause.py::_paused), then locks the task row.
     paused = _paused_now(session, project)
     fresh = lock_task(session, task.id)
-    if fresh is None or _stamp(fresh) != started_from:
+    if _moved_on(fresh, started_from):
         project_id, task_id = project.id, task.id  # read before the rollback expires them
         now = None if fresh is None else fresh.status
         session.rollback()
