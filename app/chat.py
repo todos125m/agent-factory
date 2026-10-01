@@ -21,13 +21,33 @@ from app.gateway.service import Gateway
 from app.manager import ManagerError, ensure_active, manager_agent
 from app.models import ChatMessage, Project, Task, utcnow
 
-_ACTION_RE = re.compile(r"^(none|plan|approve|checkpoint:\d+)$")
+_ACTION_RE = re.compile(r"^(none|plan|approve|checkpoint:\d{1,12})$")  # fits ChatMessage.suggested_action
 HISTORY_LIMIT = 8
+
+
+def _unstorable(text: str) -> str | None:
+    """Why the database would refuse `text`, if it would: both halves of a turn are stored only after the paid
+    call (d19), so this is checked before the store can fail there. NUL: PostgreSQL text can't hold one; a lone
+    surrogate: not encodable as UTF-8."""
+    if "\x00" in text:
+        return "must not contain NUL characters"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return "is not valid Unicode (lone surrogate)"
+    return None
 
 
 class ChatReplyOut(BaseModel):
     reply: str
     suggested_action: str = "none"
+
+    @field_validator("reply")
+    @classmethod
+    def _storable_reply(cls, v: str) -> str:
+        if problem := _unstorable(v):
+            raise ValueError(f"reply {problem}")
+        return v
 
     @field_validator("suggested_action")
     @classmethod
@@ -50,19 +70,9 @@ def _chat_user_content(session: Session, project: Project, new: ChatMessage) -> 
     return f"Project goal: {project.goal}\nTasks:\n{task_lines}\nRecent chat:\n{history_lines}"
 
 
-def _check_storable(text: str) -> None:
-    """Refuse, before the paid call, text the database would refuse only after it, at the store (d19): a NUL
-    (PostgreSQL text can't hold one) or a lone surrogate (not encodable as UTF-8)."""
-    if "\x00" in text:
-        raise ManagerError("chat text must not contain NUL characters")
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        raise ManagerError("chat text is not valid Unicode (lone surrogate)") from None
-
-
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:
-    _check_storable(text)
+    if problem := _unstorable(text):  # refused before the call, not at the store after it
+        raise ManagerError(f"chat text {problem}")
     ensure_active(session, project, "chat")
     # In the prompt now, in the session only with the reply: nothing is written while the model runs (d19).
     user_msg = ChatMessage(project_id=project.id, role="user", text=text, created_at=utcnow())

@@ -50,7 +50,11 @@ class FailingProvider(FakeProvider):
     (0.000001, lambda: FakeProvider(replies=[CHAT_REPLY]), 402),
     (None, FailingProvider, 502),
     (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "do_it_now"}]), 422),
-], ids=["budget", "provider_error", "invalid_reply"])
+    # Replies the database would refuse at the store, after the spend: refused as invalid instead, not a 500.
+    (None, lambda: FakeProvider(replies=[{"reply": "ok \ud83d", "suggested_action": "none"}]), 422),
+    (None, lambda: FakeProvider(replies=[{"reply": "ok\u0000", "suggested_action": "none"}]), 422),
+    (None, lambda: FakeProvider(replies=[{"reply": "ok", "suggested_action": "checkpoint:" + "9" * 13}]), 422),
+], ids=["budget", "provider_error", "invalid_reply", "lone_surrogate_reply", "nul_reply", "oversized_checkpoint"])
 def test_a_turn_without_a_reply_stores_nothing(client, monkeypatch, budget, make_provider, status):
     """Nothing reaches the chat, so a resend leaves no unanswered duplicate; the failure itself stays on the
     record. Through the real gateway, on the route's own session, as in production."""
