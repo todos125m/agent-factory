@@ -13,8 +13,8 @@ from app import context, memory, settings_layers, sources
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
-from app.pause import refuse_if_paused
-from app.state_machine import TransitionError, check_task_transition
+from app.pause import check_task_move, commit_unless_paused, refuse_if_paused
+from app.state_machine import TransitionError
 
 
 class ManagerError(ValueError):
@@ -23,7 +23,8 @@ class ManagerError(ValueError):
 
 def ensure_active(session: Session, project: Project, action: str, task_id: int | None = None, **detail: Any) -> None:
     """The pause policy (app/pause.py) at every entry point that would spend a model call or move a task to
-    READY/RUNNING, called before changing anything; routers answer the refusal with 409."""
+    READY/RUNNING, called before changing anything (the transition route, whose only work is the move, relies
+    on the move's own check); routers answer the refusal with 409."""
     refuse_if_paused(session, project.id, action, task_id, **detail)
 
 
@@ -221,13 +222,13 @@ def create_plan(session: Session, gateway: Gateway, project: Project, *, feedbac
 
 
 def _promote_ready(session: Session, project_id: int, tasks: list[Task], reason: str) -> list[int]:
-    """CREATED `tasks` whose dependencies are all done become READY (§33)."""
+    """CREATED `tasks` whose dependencies are all done become READY (§33). On a paused project none does:
+    check_task_move's refusal rolls back the whole batch, and ProjectPaused is not a TransitionError to skip."""
     ready_ids: list[int] = []
     for task in tasks:
         deps = _dependency_statuses(session, task)
         try:
-            check_task_transition(task.status, TaskStatus.READY, dependency_statuses=deps,
-                                   retries=task.retries, max_retries=task.max_retries)
+            check_task_move(session, task, TaskStatus.READY, dependency_statuses=deps, reason=reason)
         except TransitionError:
             continue
         task.status = TaskStatus.READY
@@ -242,7 +243,7 @@ def approve_plan(session: Session, project: Project) -> dict[str, Any]:
     tasks = session.scalars(select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.CREATED)).all()
     ready_ids = _promote_ready(session, project.id, tasks, "plan approved")
     record_event(session, project.id, "decision.plan_approved", None, ready_task_ids=ready_ids)
-    session.commit()
+    commit_unless_paused(session, project.id, "plan.approve")
     return {"ready_task_ids": ready_ids}
 
 
@@ -299,8 +300,7 @@ def create_checkpoint(session: Session, gateway: Gateway, project: Project, task
 
 
 def _decide(session: Session, task: Task, option: int, note: str | None, *, auto: bool) -> None:
-    check_task_transition(task.status, TaskStatus.RUNNING, dependency_statuses=[],
-                           retries=task.retries, max_retries=task.max_retries)
+    check_task_move(session, task, TaskStatus.RUNNING, dependency_statuses=[])
     record_event(session, task.project_id, "decision.step", task.id, option=option, note=note, auto=auto)
     task.status = TaskStatus.RUNNING
 
@@ -308,7 +308,7 @@ def _decide(session: Session, task: Task, option: int, note: str | None, *, auto
 def decide(session: Session, project: Project, task: Task, option: int, note: str | None) -> None:
     ensure_active(session, project, "decide", task.id)
     _decide(session, task, option, note, auto=False)
-    session.commit()
+    commit_unless_paused(session, project.id, "decide", task.id)
 
 
 def _created_dependents(session: Session, project: Project, task: Task) -> list[Task]:
@@ -328,7 +328,9 @@ def _promote_ready_dependents(
 def release_withheld(session: Session, project: Project) -> list[int]:
     """On resume: promote the dependents that runs finishing during the pause withheld (see run_task).
     A withheld auto-decision is not taken here — its checkpoint waits for the owner like any other."""
-    session.flush()  # the resume first: a run finishing concurrently then either sees it or is seen below
+    # The resume first: a run finishing concurrently then either sees it or is seen below, and the
+    # promotions' pause check (check_task_move, a fresh read) sees the project active.
+    session.flush()
     last_pause = session.scalar(
         select(func.max(RunEvent.id)).where(RunEvent.project_id == project.id, RunEvent.type == "project.paused")
     )
@@ -352,8 +354,7 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     ensure_active(session, project, "run", task.id)
     if task.status is not TaskStatus.RUNNING:
         raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
-    check_task_transition(task.status, TaskStatus.COMPLETED, dependency_statuses=[],
-                           retries=task.retries, max_retries=task.max_retries)
+    check_task_move(session, task, TaskStatus.COMPLETED, dependency_statuses=[])
     previous = task.status
 
     if not task.owner:

@@ -4,11 +4,11 @@ from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.events import record_event
-from app.manager import ensure_active
 from app.models import Task, TaskDependency, TaskStatus
+from app.pause import check_task_move, commit_unless_paused
 from app.routers.projects import load_project
 from app.schemas import TaskCreate, TaskOut, TaskTransition
-from app.state_machine import DONE_STATUSES, TransitionError, check_task_transition
+from app.state_machine import DONE_STATUSES, START_STATUSES, TransitionError
 
 router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["tasks"])
 
@@ -73,18 +73,10 @@ def get_task(project_id: int, task_id: int, session: Session = Depends(get_sessi
 
 @router.post("/{task_id}/transition", response_model=TaskOut)
 def transition_task(project_id: int, task_id: int, body: TaskTransition, session: Session = Depends(get_session)):
-    project = load_project(session, project_id)
+    load_project(session, project_id)
     task = load_task(session, project_id, task_id)
     try:
-        if body.status in {TaskStatus.READY, TaskStatus.RUNNING}:
-            ensure_active(session, project, "transition", task.id, to=body.status.value)
-        check_task_transition(
-            task.status,
-            body.status,
-            dependency_statuses=dependency_statuses(session, task),
-            retries=task.retries,
-            max_retries=task.max_retries,
-        )
+        check_task_move(session, task, body.status, dependency_statuses=dependency_statuses(session, task))
     except TransitionError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -101,5 +93,8 @@ def transition_task(project_id: int, task_id: int, body: TaskTransition, session
         task.id,
         **{"from": previous.value, "to": body.status.value, "reason": body.reason},
     )
-    session.commit()
+    if body.status in START_STATUSES:  # the owner may have paused since check_task_move read it
+        commit_unless_paused(session, project_id, "transition", task.id, to=body.status.value)
+    else:
+        session.commit()
     return task

@@ -12,7 +12,7 @@ from app.manager import ManagerError
 from app.routers.projects import load_project
 from app.routers.tasks import load_task
 from app.schemas import ChatMessageOut, ChatTurnOut, TaskOut, TaskRunResultOut
-from app.state_machine import TransitionError
+from app.state_machine import ProjectPaused, TransitionError
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["manager"])
 
@@ -32,7 +32,7 @@ def _run(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         raise HTTPException(402, str(e)) from e
     except ProviderError as e:
         raise HTTPException(502, str(e)) from e
-    except TransitionError as e:  # incl. ProjectPaused: every route here is refused while paused
+    except (TransitionError, ProjectPaused) as e:  # every route here is refused while paused
         raise HTTPException(409, str(e)) from e
 
 
