@@ -1,0 +1,6 @@
+section: action_engine
+questions:
+  - id: action_engine.actions
+    text: "این Agent چه اقدام‌هایی انجام می‌دهد؟ (برای Persona: click/choose/abandon؛ برای Specialist: نام همان capabilityها)"
+    type: text
+    target: action_engine.actions

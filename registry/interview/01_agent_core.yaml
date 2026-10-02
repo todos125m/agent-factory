@@ -1,0 +1,38 @@
+section: agent_core
+questions:
+  - id: agent_core.agent_type
+    text: "این Agent یک Persona Agent (شبیه‌ساز کاربر برای تست محصول) است یا یک Agent متخصص؟"
+    type: single_choice
+    target: agent_core.agent_type
+    options:
+      - value: specialist
+        label: "Specialist — کار مشخصی انجام می‌دهد (تحقیق، محتوا، کد، بازبینی و ...)"
+        recommended: true
+      - value: persona
+        label: "Persona Agent — نقش یک کاربر واقعی را بازی می‌کند"
+  - id: agent_core.name
+    text: "یک نام کوتاه انگلیسی برای Agent (فقط حروف کوچک/عدد/‑ یا _، مثل research یا content_writer)"
+    type: text
+    target: agent_core.name
+  - id: agent_core.description
+    text: "این Agent دقیقاً چه کاری انجام می‌دهد؟ (یک یا دو جمله)"
+    type: text
+    target: agent_core.description
+  - id: agent_core.model_role
+    text: "این Agent برای کدام نقش مدل ساخته می‌شود؟"
+    type: single_choice
+    target: agent_core.model_role
+    options:
+      - value: research
+        label: "research — جمع‌آوری و تحلیل اطلاعات"
+        recommended: true
+      - value: coding
+        label: "coding — نوشتن/بازبینی کد"
+      - value: manager
+        label: "manager — برنامه‌ریزی و تفویض کار"
+      - value: cheap
+        label: "cheap — کارهای ساده و ارزان"
+  - id: agent_core.capabilities
+    text: "این Agent چه توانایی‌هایی دارد؟ (لیست کوتاه، هرکدام یک کلمه/عبارت کوتاه)"
+    type: text
+    target: agent_core.capabilities

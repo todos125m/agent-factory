@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-factory/registry/blueprint.schema.json",
+  "title": "Agent Blueprint",
+  "description": "docs/AGENT_BLUEPRINT.md — the mandatory 14-section standard every agent must satisfy. Validated deterministically by app/blueprint.py (no model calls).",
+  "type": "object",
+  "required": [
+    "agent_core",
+    "knowledge_boundary",
+    "action_engine",
+    "tools_plugins",
+    "memory",
+    "observation",
+    "data_storage",
+    "external_integrations",
+    "orchestration",
+    "security",
+    "scalability"
+  ],
+  "properties": {
+    "agent_core": {
+      "type": "object",
+      "required": ["name", "description", "model_role", "agent_type", "capabilities"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,99}$" },
+        "version": { "type": "integer", "minimum": 1, "default": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "model_role": { "type": "string", "enum": ["manager", "research", "coding", "cheap"] },
+        "agent_type": { "type": "string", "enum": ["persona", "specialist"] },
+        "capabilities": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "instructions": { "type": "string" }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "required": ["name", "knows", "does_not_understand", "patience", "goals"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "knows": { "type": "array", "items": { "type": "string" } },
+        "does_not_understand": { "type": "array", "items": { "type": "string" } },
+        "patience": { "type": "string", "enum": ["low", "medium", "high"] },
+        "goals": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "tone": { "type": "string" }
+      }
+    },
+    "knowledge_boundary": {
+      "type": "object",
+      "required": ["allowed_sources", "general_llm_knowledge"],
+      "properties": {
+        "allowed_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["persona.knows", "memory.phase_current", "task.input", "skills"]
+          }
+        },
+        "general_llm_knowledge": { "type": "boolean", "const": false },
+        "forbidden_topics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "action_engine": {
+      "type": "object",
+      "required": ["actions"],
+      "properties": {
+        "actions": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "purposeful": { "type": "boolean", "default": true },
+        "imperfect": { "type": "boolean", "default": true },
+        "human": { "type": "boolean", "default": true }
+      }
+    },
+    "tools_plugins": {
+      "type": "object",
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["web_search", "repo_read", "repo_write", "terminal", "deploy"]
+          }
+        },
+        "plugins": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "required": ["short_term", "long_term_sources"],
+      "properties": {
+        "short_term": { "type": "boolean", "const": true },
+        "long_term_sources": { "type": "array", "items": { "type": "string" } },
+        "retention_days": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["record"],
+      "properties": {
+        "record": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["cognitive", "emotional", "behavioral", "runevent"] }
+        }
+      }
+    },
+    "memory_log": {
+      "type": "object",
+      "properties": {
+        "notes": { "type": "string" }
+      }
+    },
+    "data_storage": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": { "type": "string", "const": "postgres_pgvector" },
+        "file_storage": { "type": "string", "enum": ["local"] }
+      }
+    },
+    "external_integrations": {
+      "type": "object",
+      "required": ["services"],
+      "properties": {
+        "services": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "required": ["via_orchestrator", "approval_gate"],
+      "properties": {
+        "via_orchestrator": { "type": "boolean", "const": true },
+        "approval_gate": { "type": "string", "enum": ["auto", "checkpoint", "always"] },
+        "notes": { "type": "string" }
+      }
+    },
+    "tech_stack": {
+      "type": "object",
+      "properties": {
+        "notes": { "type": "string" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "required": ["permissions", "budget"],
+      "properties": {
+        "permissions": {
+          "type": "object",
+          "required": ["network", "repo_write", "deploy"],
+          "properties": {
+            "network": { "type": "boolean" },
+            "repo_write": { "type": "boolean" },
+            "deploy": { "type": "boolean" }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "max_cost": { "type": "number", "exclusiveMinimum": 0 },
+            "max_tokens": { "type": "integer", "exclusiveMinimum": 0 }
+          }
+        },
+        "data_classification": { "type": "string", "enum": ["public", "internal", "sensitive"], "default": "internal" }
+      }
+    },
+    "scalability": {
+      "type": "object",
+      "required": ["deployment", "evaluation"],
+      "properties": {
+        "deployment": { "type": "string", "const": "docker_compose" },
+        "evaluation": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "retry_policy": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+section: persona
+depends_on:
+  agent_core.agent_type: [persona]
+questions:
+  - id: persona.name
+    text: "اسم/عنوان کوتاه این پرسونا چیست؟ (مثل first_time_freelancer)"
+    type: text
+    target: persona.name
+  - id: persona.knows
+    text: "این پرسونا از قبل چه چیزهایی می‌داند؟ (لیست کوتاه)"
+    type: text
+    target: persona.knows
+  - id: persona.does_not_understand
+    text: "این پرسونا چه چیزهایی را نمی‌فهمد/بلد نیست؟ (لیست کوتاه — Persona نباید همه‌چیزدان باشد)"
+    type: text
+    target: persona.does_not_understand
+  - id: persona.patience
+    text: "میزان صبر این پرسونا در استفاده از محصول چقدر است؟"
+    type: single_choice
+    target: persona.patience
+    options:
+      - value: low
+        label: "کم — زود رها می‌کند"
+        recommended: true
+      - value: medium
+        label: "متوسط"
+      - value: high
+        label: "زیاد — تلاش می‌کند"
+  - id: persona.goals
+    text: "این پرسونا با استفاده از محصول دنبال چه هدفی است؟ (لیست کوتاه)"
+    type: text
+    target: persona.goals

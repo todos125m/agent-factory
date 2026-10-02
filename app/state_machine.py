@@ -1,0 +1,81 @@
+"""Task and project state machines (docs/ARCHITECTURE.md §23, §40, §46).
+
+Pure functions only — the routers apply the transition and record a RunEvent.
+"""
+
+from app.models import ProjectStage, TaskStatus
+
+S = TaskStatus
+
+TASK_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
+    S.CREATED: {S.READY, S.CANCELLED},
+    S.READY: {S.RUNNING, S.CANCELLED},
+    S.RUNNING: {S.WAITING, S.COMPLETED, S.FAILED},
+    S.WAITING: {S.RUNNING, S.FAILED, S.CANCELLED},
+    # COMPLETED -> READY is the reviewer's CHANGES_REQUIRED loop (§21).
+    S.COMPLETED: {S.REVIEWED, S.READY},
+    # FAILED -> READY is a retry (bounded by max_retries); otherwise escalate (§46).
+    S.FAILED: {S.READY, S.ESCALATED},
+    S.ESCALATED: {S.READY, S.CANCELLED},
+    S.REVIEWED: set(),
+    S.CANCELLED: set(),
+}
+
+# A dependency is satisfied once its task produced a result.
+DONE_STATUSES = {S.COMPLETED, S.REVIEWED}
+
+# A move to one of these starts work, so none happens while the project is paused (owner decision d16).
+START_STATUSES = {S.READY, S.RUNNING}
+
+
+class TransitionError(ValueError):
+    pass
+
+
+class ProjectPaused(Exception):
+    """Not a TransitionError: a loop that skips a task it can't move (`except TransitionError: continue`) must
+    stop on a paused project instead. Routes answer it 409 like a TransitionError (app/main.py)."""
+
+
+def check_project_active(paused: bool) -> None:
+    """A project can be paused at any stage (§40); while paused no task moves to READY/RUNNING and no
+    model call is made (app/pause.py applies this and records the refusal)."""
+    if paused:
+        raise ProjectPaused("Project is paused")
+
+
+def check_task_transition(
+    current: TaskStatus,
+    target: TaskStatus,
+    *,
+    dependency_statuses: list[TaskStatus],
+    retries: int,
+    max_retries: int,
+    paused: bool,
+) -> None:
+    """`paused` is required, so no caller checks a move without saying whether its project is paused
+    (app/pause.py::check_task_move reads it fresh; a test keeps every status write in app/ behind it). The
+    pause is checked first, as at the entry points: a paused project's move to READY/RUNNING is refused
+    whatever else is wrong."""
+    if target in START_STATUSES:
+        check_project_active(paused)
+    if target not in TASK_TRANSITIONS[current]:
+        raise TransitionError(f"Cannot move task from {current.value} to {target.value}")
+    if target is S.READY and current is S.CREATED:
+        blocked = [s for s in dependency_statuses if s not in DONE_STATUSES]
+        if blocked:
+            raise TransitionError("Task has unfinished dependencies")
+    if current is S.FAILED and target is S.READY and retries >= max_retries:
+        raise TransitionError(f"Retry limit reached ({max_retries}); escalate instead")
+
+
+PROJECT_STAGES = list(ProjectStage)
+
+
+def check_project_advance(current: ProjectStage, target: ProjectStage) -> None:
+    """Stages move forward one step at a time; ITERATION loops back to DISCOVERY."""
+    if current is ProjectStage.ITERATION and target is ProjectStage.DISCOVERY:
+        return
+    idx = PROJECT_STAGES.index(current)
+    if idx + 1 >= len(PROJECT_STAGES) or PROJECT_STAGES[idx + 1] is not target:
+        raise TransitionError(f"Cannot move project from {current.value} to {target.value}")

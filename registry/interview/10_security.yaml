@@ -1,0 +1,33 @@
+section: security
+questions:
+  - id: security.permissions.network
+    text: "این Agent اجازه‌ی دسترسی به شبکه/اینترنت را دارد؟"
+    type: confirm
+    target: security.permissions.network
+    recommended: false
+  - id: security.permissions.repo_write
+    text: "این Agent اجازه‌ی نوشتن در مخزن کد را دارد؟"
+    type: confirm
+    target: security.permissions.repo_write
+    recommended: false
+  - id: security.permissions.deploy
+    text: "این Agent اجازه‌ی دیپلوی دارد؟"
+    type: confirm
+    target: security.permissions.deploy
+    recommended: false
+  - id: security.budget.max_cost
+    text: "سقف بودجه‌ی این Agent برای هر اجرا چقدر باشد؟ (دلار، عدد)"
+    type: text
+    target: security.budget.max_cost
+  - id: security.data_classification
+    text: "داده‌ای که این Agent با آن کار می‌کند چه حساسیتی دارد؟"
+    type: single_choice
+    target: security.data_classification
+    options:
+      - value: internal
+        label: "internal"
+        recommended: true
+      - value: public
+        label: "public"
+      - value: sensitive
+        label: "sensitive"

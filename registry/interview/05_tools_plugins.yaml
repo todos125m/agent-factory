@@ -1,0 +1,18 @@
+section: tools_plugins
+questions:
+  - id: tools_plugins.tools
+    text: "این Agent به کدام ابزارها نیاز دارد؟"
+    type: multi_choice
+    target: tools_plugins.tools
+    options:
+      - value: web_search
+        label: "جست‌وجوی وب"
+      - value: repo_read
+        label: "خواندن مخزن کد"
+      - value: repo_write
+        label: "نوشتن در مخزن کد"
+      - value: terminal
+        label: "اجرای دستور در ترمینال"
+      - value: deploy
+        label: "دیپلوی"
+    note: "می‌تواند خالی بماند — بدون permission متناظر در بخش Security، هیچ ابزاری فعال نمی‌شود."
