@@ -121,6 +121,8 @@ CLOSED = {
     ("user_preferences", "ui_locale"): lambda: set(LOCALES),  # PreferencesUpdate's Literals
     ("user_preferences", "audience_level"): lambda: set(AUDIENCE_LEVELS),
     ("user_preferences", "code_visibility"): lambda: set(CODE_VISIBILITY),
+    ("auth_sessions", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest (app/auth.py::_digest)
+    ("login_codes", "code_hash"): lambda: {"f" * 64},
 }
 
 CODE = {("run_events", "type")}  # the literal passed to record_event: test_every_event_type_fits_its_column
@@ -504,6 +506,9 @@ PLAIN_BODIES = {
     "RatingIn": "an integer from 1 to 5",
     "BenchmarkRequest": "a list of RouteIn, which is a StorableIn",
     "PreferencesUpdate": "closed sets of short values (Literal), each audited in CLOSED",
+    "LoginIn": "the code is never stored, only its SHA-256 (app/auth.py)",
+    "ClaimIn": "an id, and an owner token that is only compared, never stored",
+    "CodeIn": "an optional id",
 }
 UNTYPED_BODIES = {  # (method, path) of a body taken as a plain dict: who validates it
     ("POST", "/agents"): "AgentSpec, a StorableIn",

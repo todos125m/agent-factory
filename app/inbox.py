@@ -51,9 +51,9 @@ def _last_ready(events: list[RunEvent]) -> dict[int, RunEvent]:
     return last
 
 
-def list_inbox(session: Session) -> list[dict[str, Any]]:
+def list_inbox(session: Session, owner_id: int) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    for project in session.scalars(select(Project).order_by(Project.id)).all():
+    for project in session.scalars(select(Project).where(Project.owner_id == owner_id).order_by(Project.id)).all():
         if project.paused:
             continue
         events = list(session.scalars(

@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import current_user
 from app.db import get_session
 from app.errors import AppError, not_found, refused
 from app.events import record_event
-from app.models import Task, TaskDependency, TaskStatus
+from app.models import Task, TaskDependency, TaskStatus, User
 from app.pause import check_task_move, commit_unless_paused
 from app.routers.projects import load_project
 from app.schemas import TaskCreate, TaskOut, TaskTransition
@@ -14,7 +15,9 @@ from app.state_machine import DONE_STATUSES, START_STATUSES, TransitionError
 router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["tasks"])
 
 
-def load_task(session: Session, project_id: int, task_id: int) -> Task:
+def load_task(session: Session, project_id: int, task_id: int, me: User) -> Task:
+    """The task, if its project is `me`'s (checked here, so no route can forget it)."""
+    load_project(session, project_id, me)
     task = session.get(Task, task_id)
     if not task or task.project_id != project_id:
         raise not_found("task")
@@ -28,8 +31,8 @@ def dependency_statuses(session: Session, task: Task) -> list[TaskStatus]:
 
 
 @router.post("", response_model=TaskOut, status_code=201)
-def create_task(project_id: int, body: TaskCreate, session: Session = Depends(get_session)):
-    load_project(session, project_id)
+def create_task(project_id: int, body: TaskCreate, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    load_project(session, project_id, me)
     dep_ids = set(body.depends_on)
     if dep_ids:
         found = set(session.scalars(select(Task.id).where(Task.id.in_(dep_ids), Task.project_id == project_id)))
@@ -48,8 +51,8 @@ def create_task(project_id: int, body: TaskCreate, session: Session = Depends(ge
 
 
 @router.get("", response_model=list[TaskOut])
-def list_tasks(project_id: int, status: TaskStatus | None = None, session: Session = Depends(get_session)):
-    load_project(session, project_id)
+def list_tasks(project_id: int, status: TaskStatus | None = None, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    load_project(session, project_id, me)
     query = select(Task).where(Task.project_id == project_id).order_by(Task.priority.desc(), Task.id)
     if status is not None:
         query = query.where(Task.status == status)
@@ -57,9 +60,9 @@ def list_tasks(project_id: int, status: TaskStatus | None = None, session: Sessi
 
 
 @router.get("/runnable", response_model=list[TaskOut])
-def runnable_tasks(project_id: int, session: Session = Depends(get_session)):
+def runnable_tasks(project_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
     """CREATED tasks whose dependencies are all done — these can run in parallel (§33)."""
-    load_project(session, project_id)
+    load_project(session, project_id, me)
     tasks = session.scalars(
         select(Task)
         .where(Task.project_id == project_id, Task.status == TaskStatus.CREATED)
@@ -69,14 +72,14 @@ def runnable_tasks(project_id: int, session: Session = Depends(get_session)):
 
 
 @router.get("/{task_id}", response_model=TaskOut)
-def get_task(project_id: int, task_id: int, session: Session = Depends(get_session)):
-    return load_task(session, project_id, task_id)
+def get_task(project_id: int, task_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    return load_task(session, project_id, task_id, me)
 
 
 @router.post("/{task_id}/transition", response_model=TaskOut)
-def transition_task(project_id: int, task_id: int, body: TaskTransition, session: Session = Depends(get_session)):
-    load_project(session, project_id)
-    task = load_task(session, project_id, task_id)
+def transition_task(project_id: int, task_id: int, body: TaskTransition, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    load_project(session, project_id, me)
+    task = load_task(session, project_id, task_id, me)
     try:
         check_task_move(session, task, body.status, dependency_statuses=dependency_statuses(session, task))
     except TransitionError as e:

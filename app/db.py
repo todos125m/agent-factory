@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 
 from sqlalchemy import Column, Enum, String, Table, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -74,6 +75,29 @@ def ensure_column_lengths(bind) -> None:
             connection.execute(text(widen_statement(bind.dialect, table, column, length)))
         log.warning("widened %s.%s to VARCHAR(%d): the models declare it longer than this database had it",
                     table.name, column.name, length)
+
+
+MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+
+
+def alembic_config():
+    from alembic.config import Config
+
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    return config
+
+
+def migrate(bind) -> None:
+    """Bring the database to the models' schema: `alembic upgrade head` on one connection, in one transaction where the
+    database allows it. Works on an empty database, on one built by `create_all` before migrations existed (the
+    baseline only creates what is missing, owner decision d34) and on an already migrated one (nothing to do)."""
+    from alembic import command
+
+    config = alembic_config()
+    with bind.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
 
 
 def get_session() -> Iterator[Session]:

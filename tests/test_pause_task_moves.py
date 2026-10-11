@@ -21,6 +21,7 @@ from app.models import Task, TaskStatus
 from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
 from app.state_machine import TASK_TRANSITIONS, ProjectPaused, TransitionError, check_task_transition
+from tests.conftest import owner_of
 from tests.test_manager import _ready_task
 from tests.test_project_pause import _assert_refused, _events, _pause, _status
 
@@ -35,7 +36,7 @@ def _created_task(client, pid):
 
 def _owner_pauses(session_factory, pid):
     with session_factory() as s:  # the owner's pause request, in its own session
-        set_paused(pid, ProjectPauseUpdate(paused=True), session=s)
+        set_paused(pid, ProjectPauseUpdate(paused=True), session=s, me=owner_of(s, pid))
 
 
 # ---------- the rule (pure) ----------
@@ -220,7 +221,7 @@ def test_the_commit_holds_off_a_pause_until_the_moves_have_landed(client, sessio
         if lock:
             with owner() as s:
                 try:
-                    set_paused(project_id, ProjectPauseUpdate(paused=True), session=s)
+                    set_paused(project_id, ProjectPauseUpdate(paused=True), session=s, me=owner_of(s, project_id))
                 except OperationalError as e:
                     held_off.append(str(e))
         return result

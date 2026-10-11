@@ -114,6 +114,7 @@ def test_budget_blocks_the_call_and_records_event(session, client):
     with pytest.raises(BudgetExceeded):
         gw.call("manager", system="s", user="u", project_id=project.id)
     assert fake.requests == []  # nothing was sent
+    client.sign_in_as(project.owner_id)  # the project was made straight in the database
     events = client.get(f"/projects/{project.id}/events").json()
     assert events[-1]["type"] == "budget.exceeded"
 
@@ -139,6 +140,7 @@ def test_list_model_calls_for_a_project(session, client):
     project = make_project(session)
     gw, fake = use_fake(session, replies=[{"steps": []}])
     gw.call("manager", system="s", user="u", project_id=project.id, agent="manager", json_schema={"type": "object"})
+    client.sign_in_as(project.owner_id)  # the project was made straight in the database, for its own account
     calls = client.get(f"/projects/{project.id}/model_calls").json()
     assert len(calls) == 1
     assert calls[0]["agent"] == "manager" and calls[0]["provider"] == "fake" and calls[0]["ok"] is True

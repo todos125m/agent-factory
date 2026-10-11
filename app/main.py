@@ -12,9 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import errors, sources
-from app.db import Base, SessionLocal, engine, ensure_column_lengths, ensure_indexes
+from app.db import SessionLocal, engine, ensure_column_lengths, ensure_indexes, migrate
 from app.registry import sync_from_files
-from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
+from app.routers import (
+    agents, auth, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users,
+)
 from app.state_machine import ProjectPaused, TransitionError
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -22,8 +24,9 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Phase 1 convenience; switch to Alembic migrations once the schema settles.
-    Base.metadata.create_all(engine)
+    # Alembic (migrations/, owner decision d34): an empty database, one built by create_all before migrations, or an
+    # up-to-date one. The two repairs below stay idempotent safety nets for indexes and widened columns.
+    migrate(engine)
     ensure_indexes(engine)
     ensure_column_lengths(engine)
     with SessionLocal() as session:
@@ -72,6 +75,7 @@ async def transition_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=409, content=errors.body(409, error.detail, error.code))
 
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)

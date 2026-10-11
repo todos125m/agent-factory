@@ -9,7 +9,7 @@ import enum
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -66,6 +66,41 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True)
     name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # The server's owner: the only one who may change what every user shares (global settings, the agent registry,
+    # benchmarks). The first account of a server gets it (app/auth.py::create_account; migration 0002 for old ones).
+    is_admin: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # An account from before login existed (migration 0002): it has no session yet, and may be claimed once by the
+    # browser that made it (app/auth.py::claim). A new account is signed in when it is made, so never claimable.
+    claimable: Mapped[bool] = mapped_column(default=False, server_default=false())
+
+
+class AuthSession(Base):
+    """A signed-in browser (docs/HUMAN_GUIDED_FACTORY.md, owner decision d33). Only the token's SHA-256 is stored: the
+    token itself lives in the browser's HttpOnly cookie, so a leaked database signs no one in."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LoginCode(Base):
+    """A one-time code a signed-in owner makes to sign in another device (no passwords, no e-mail). Short-lived and
+    single-use; only its SHA-256 is stored."""
+
+    __tablename__ = "login_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class UserPreference(Base):
@@ -87,6 +122,8 @@ class Workspace(Base):
     __tablename__ = "workspaces"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Whose it is (migration 0002 gives the workspaces made before login to the admin). Never None for a new one.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

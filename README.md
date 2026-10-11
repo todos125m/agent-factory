@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
+| Human-guided factory (Issue #2) | PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -42,7 +42,8 @@ uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost
 pytest
 ```
 
-The UI (`/app`) creates a default owner automatically on first open (no setup step) and is an installable
+The UI (`/app`) creates the server's first account (its admin) automatically on first open (no setup step); see
+"Sign-in" below for every later device and account. It is an installable
 PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gives it its own icon.
 
 Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
@@ -203,6 +204,27 @@ clients); the UI shows `code` in the owner's language (`web/i18n.js`, `err.<code
 reason. Codes: `not_found` (`params.resource`), `invalid_request`, `settings_invalid`, `unknown_dependencies`,
 `agent_invalid`, `request_refused`, `email_taken`, `transition_refused`, `project_paused`, `budget_exceeded`,
 `provider_unavailable`; a plain HTTP error gets one by status.
+
+### Sign-in and access (owner decision d33)
+
+No passwords. The first visitor of a server gets its first account, which is the **admin**. A signed-in browser holds
+an HttpOnly, SameSite=Strict session cookie (`/auth/me`, `/auth/logout`); the database keeps only its SHA-256.
+Another device signs in with a **one-time code** (Settings → "Sign in on another device": `POST /auth/login-codes`,
+then `POST /auth/login`; 10 minutes, single use). Only the admin creates accounts (`POST /users` while signed in) and
+hands each over with a code for it. An account from before sign-in existed is taken over once (`POST /auth/claim`):
+automatically from the server's own machine, elsewhere with `AGENT_FACTORY_OWNER_TOKEN`.
+
+Every account sees only its own projects, tasks, workspaces, settings layers, memory, chat, feedback and preferences;
+another account's id answers the same 404 as a missing one. Only the admin changes what every account shares: the
+global settings layer, the agent registry, benchmarks. `tests/test_auth.py` fails if any route is reachable without a
+session (except the sign-in routes and `/health`).
+
+### Database migrations (owner decision d34)
+
+Alembic (`migrations/`). The app migrates at startup (`app/db.py::migrate`): an empty database, one made by the old
+`create_all` startup (no history: the baseline creates only what is missing) and an up-to-date one all end at the
+models' schema, rows kept — checked on SQLite in `tests/test_migrations.py` and on PostgreSQL 16. New change:
+`DATABASE_URL=… alembic revision --autogenerate -m "…"`, then review the generated file.
 
 ### Languages
 

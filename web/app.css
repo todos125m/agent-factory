@@ -169,3 +169,4 @@ details.advanced>summary{cursor:pointer;font-weight:700;min-height:32px}
 pre.code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:var(--surface-2);padding:10px;border-radius:var(--radius-sm);text-align:left;margin:8px 0 0}
 code,pre,input[type=number]{unicode-bidi:plaintext}
 .notice{margin:12px 20px 0;padding:10px 14px;border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--warn);font-size:13px}
+.login-code{font-size:22px;font-weight:800;letter-spacing:2px;padding:8px 12px;background:var(--surface-2);border-radius:var(--radius-sm);align-self:flex-start}
