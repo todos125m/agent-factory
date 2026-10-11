@@ -17,6 +17,7 @@ from app.routers.manager import get_gateway
 from app.routers.projects import set_paused
 from app.schemas import ProjectPauseUpdate
 from app.state_machine import ProjectPaused
+from tests.conftest import owner_of
 from tests.test_manager import CHECKPOINT, _ready_task
 from tests.test_task_run import PLAN, RUN_RESULT
 
@@ -56,7 +57,7 @@ class PausingProvider(FakeProvider):
 
     def complete(self, request):
         with self.session_factory() as s:  # the owner's pause request, in its own session
-            set_paused(self.project_id, ProjectPauseUpdate(paused=True), session=s)
+            set_paused(self.project_id, ProjectPauseUpdate(paused=True), session=s, me=owner_of(s, self.project_id))
         return super().complete(request)
 
 

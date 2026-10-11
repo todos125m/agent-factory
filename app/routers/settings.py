@@ -5,29 +5,29 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import settings_layers
+from app import auth, settings_layers
+from app.auth import current_user
 from app.db import get_session
 from app.errors import AppError, not_found
-from app.models import Project, SettingsLayer, SettingsScope, Task, Workspace
+from app.models import SettingsLayer, SettingsScope, Task, User, Workspace
 from app.schemas import SettingsLayerIn, SettingsLayerOut, WorkspaceCreate, WorkspaceOut
 
 router = APIRouter(tags=["settings"])
 
-SCOPE_MODELS = {SettingsScope.WORKSPACE: Workspace, SettingsScope.PROJECT: Project, SettingsScope.TASK: Task}
 MAX_REPORTED_PROBLEMS = 10
 
 
 @router.post("/workspaces", response_model=WorkspaceOut, status_code=201)
-def create_workspace(body: WorkspaceCreate, session: Session = Depends(get_session)):
-    workspace = Workspace(name=body.name)
+def create_workspace(body: WorkspaceCreate, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    workspace = Workspace(name=body.name, owner_id=me.id)
     session.add(workspace)
     session.commit()
     return workspace
 
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
-def list_workspaces(session: Session = Depends(get_session)):
-    return session.scalars(select(Workspace).order_by(Workspace.name)).all()
+def list_workspaces(session: Session = Depends(get_session), me: User = Depends(current_user)):
+    return session.scalars(select(Workspace).where(Workspace.owner_id == me.id).order_by(Workspace.name)).all()
 
 
 @router.get("/settings/resolved")
@@ -35,22 +35,44 @@ def resolved_settings(
     workspace_id: int | None = None,
     project_id: int | None = None,
     task_id: int | None = None,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session), me: User = Depends(current_user),
 ) -> dict[str, Any]:
+    """Effective settings for the signed-in account's own workspace / project / task (each id given is checked)."""
+    if workspace_id is not None:
+        auth.own_workspace(session, workspace_id, me)
+    if project_id is not None:
+        auth.own_project(session, project_id, me)
+    if task_id is not None:
+        _own_task(session, task_id, me)
     return settings_layers.resolve(session, workspace_id=workspace_id, project_id=project_id, task_id=task_id)
 
 
-def _check_scope(session: Session, scope: SettingsScope, scope_id: int) -> None:
+def _own_task(session: Session, task_id: int, me: User) -> Task:
+    task = session.get(Task, task_id)
+    if task is None or task.project.owner_id != me.id:
+        raise not_found("task")
+    return task
+
+
+def _check_scope(session: Session, scope: SettingsScope, scope_id: int, me: User, *, writing: bool = False) -> None:
+    """Every account reads the global layer (what it inherits) and only the admin changes it (it is every account's);
+    a workspace, project or task layer is its owner's alone — another account's is the same 404 as a missing one."""
     if scope is SettingsScope.GLOBAL:
         if scope_id != 0:
             raise AppError(422, "invalid_request", "The global layer uses scope_id 0")
-    elif not session.get(SCOPE_MODELS[scope], scope_id):
-        raise not_found(scope.value, f"{scope.value} {scope_id} not found")
+        if writing and not me.is_admin:
+            raise auth.forbidden("admin_only")
+    elif scope is SettingsScope.WORKSPACE:
+        auth.own_workspace(session, scope_id, me)
+    elif scope is SettingsScope.PROJECT:
+        auth.own_project(session, scope_id, me)
+    else:
+        _own_task(session, scope_id, me)
 
 
 @router.get("/settings/{scope}/{scope_id}", response_model=SettingsLayerOut)
-def get_settings_layer(scope: SettingsScope, scope_id: int, session: Session = Depends(get_session)):
-    _check_scope(session, scope, scope_id)
+def get_settings_layer(scope: SettingsScope, scope_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    _check_scope(session, scope, scope_id, me)
     layer = settings_layers.get_layer(session, scope, scope_id)
     return SettingsLayerOut(scope=scope, scope_id=scope_id, values=layer.values if layer else {})
 
@@ -82,11 +104,11 @@ def put_settings_layer(
     scope: SettingsScope,
     scope_id: int,
     values: dict[str, Any] = Body(...),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session), me: User = Depends(current_user),
 ):
     """Replace this layer's overrides. Send only the keys this scope should change (leave a key out
     to inherit it); every value is checked against SettingsLayerIn, then stored exactly as sent."""
-    _check_scope(session, scope, scope_id)
+    _check_scope(session, scope, scope_id, me, writing=True)
     try:
         SettingsLayerIn.model_validate(values)
     except ValidationError as e:

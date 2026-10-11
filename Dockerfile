@@ -15,6 +15,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./
 COPY registry ./registry
 COPY web ./web
 

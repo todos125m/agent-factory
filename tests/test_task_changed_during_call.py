@@ -23,6 +23,7 @@ from app.routers.projects import set_paused
 from app.routers.tasks import transition_task
 from app.schemas import ProjectPauseUpdate, TaskTransition
 from app.state_machine import TransitionError
+from tests.conftest import owner_of
 from tests.test_manager import CHECKPOINT, _ready_task
 from tests.test_project_pause import (
     ActsDuringCall, _events, _model_calls, _route_to_fake, _running_task, _status, use_real_gateway,
@@ -43,7 +44,7 @@ def _moves(session_factory, pid, tid, *steps):
     for step in steps:
         status, output = step if isinstance(step, tuple) else (step, None)
         with session_factory() as s:
-            transition_task(pid, tid, TaskTransition(status=status, output=output), session=s)
+            transition_task(pid, tid, TaskTransition(status=status, output=output), session=s, me=owner_of(s, pid))
 
 
 def _decides_elsewhere(session_factory, pid, tid):
@@ -105,7 +106,7 @@ def test_a_pause_still_wins_over_a_move_during_the_checkpoint_call(client, sessi
 
     def the_owner_pauses_and_cancels():
         with session_factory() as s:
-            set_paused(pid, ProjectPauseUpdate(paused=True), session=s)
+            set_paused(pid, ProjectPauseUpdate(paused=True), session=s, me=owner_of(s, pid))
         _moves(session_factory, pid, t["id"], S.CANCELLED)
 
     use_real_gateway(client, monkeypatch, ActsDuringCall([CHECKPOINT], the_owner_pauses_and_cancels))

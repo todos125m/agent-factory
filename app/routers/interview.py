@@ -1,14 +1,16 @@
 import json
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.auth import current_user
 from app.blueprint import validate_blueprint
 from app.errors import AppError
 from app.interview import build_blueprint, load_questions, next_question
 from app.preferences import DEFAULT_LOCALE, LOCALES
 
-router = APIRouter(tags=["interview"])
+# Stateless (nothing stored, no model call), but only for signed-in accounts like every other route.
+router = APIRouter(tags=["interview"], dependencies=[Depends(current_user)])
 
 
 def _locale(value: Any) -> str:

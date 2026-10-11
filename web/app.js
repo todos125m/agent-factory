@@ -71,6 +71,10 @@ function api(path, opts){
       var data = null;
       try { data = text ? JSON.parse(text) : null; } catch(e){}
       if (!res.ok){
+        if (res.status === 401 && data && data.code === 'unauthenticated' && STATE.userId !== null){
+          STATE.userId = null;
+          setTimeout(boot, 0);  // signed out elsewhere or expired: the sign-in screen
+        }
         var msg = errorText(res.status, data);
         var err = new Error(msg);
         err.status = res.status;
@@ -126,7 +130,7 @@ function emptyBox(icon, title, sub){
 
 /* ============================== app state ============================== */
 
-var STATE = { userId: null, workspaces: [], projects: [], prefs: null };
+var STATE = { userId: null, me: null, workspaces: [], projects: [], prefs: null };
 
 // The owner's display preferences (GET/PATCH /users/{id}/preferences). Display only: nothing here changes what the
 // system may do. Until the server answers, the effective values are the defaults.
@@ -208,7 +212,7 @@ function setupLanguagePicker(){
 }
 
 // First entry: the owner picks the language explicitly (docs/FACTORY_UI_SPEC.md); nothing else is asked first.
-function renderLanguageChooser(root, onDone){
+function renderLanguageChooser(root, onDone, toAccount){
   function inLang(loc, node){ node.setAttribute('lang', loc); node.setAttribute('dir', I18N.isRtl(loc) ? 'rtl' : 'ltr'); return node; }
   var titles = I18N.LOCALES.map(function(loc){
     return inLang(loc, el('span', {class:'lang-title-part', text: I18N.tIn(loc, 'lang.choose_title')}));
@@ -217,6 +221,7 @@ function renderLanguageChooser(root, onDone){
     return inLang(loc, el('button', {class:'btn lang-choice', onclick: function(){
       I18N.setLocale(loc);
       syncLanguagePicker();
+      if (!toAccount){ onDone(); return; }  // not signed in yet: this browser only, saved to the account later
       savePreferences({ui_locale: loc}).then(onDone, function(){ onDone(); notify(t('lang.saved_locally')); });
     }}, I18N.NATIVE_NAMES[loc]));
   });
@@ -226,15 +231,63 @@ function renderLanguageChooser(root, onDone){
     el('div', {class:'btn-row lang-choices'}, buttons)));
 }
 
+// Signed in (app/auth.py): an HttpOnly session cookie this script never sees. Resolves to the account, or to null
+// when this browser must sign in (the sign-in screen is shown by boot()).
 function ensureUser(){
-  var id = localStorage.getItem('af_user_id');
-  if (id) { STATE.userId = Number(id); return Promise.resolve(STATE.userId); }
-  var email = 'owner-' + Math.random().toString(36).slice(2, 10) + '@agent-factory.local';
-  return api('/users', {method:'POST', json:{email: email, name:t('common.owner_name')}}).then(function(u){
-    localStorage.setItem('af_user_id', u.id);
-    STATE.userId = u.id;
-    return u.id;
+  return api('/auth/state').then(function(st){
+    if (st.signed_in) return api('/auth/me');
+    var oldId = localStorage.getItem('af_user_id');  // an account from before login existed: claim it once
+    if (oldId) return api('/auth/claim', {method:'POST', json:{user_id: Number(oldId)}}).catch(function(){ return null; });
+    if (!st.accounts_exist){  // the server's first visitor: its admin
+      var email = 'owner-' + Math.random().toString(36).slice(2, 10) + '@agent-factory.local';
+      return api('/users', {method:'POST', json:{email: email, name:t('common.owner_name')}});
+    }
+    return null;
+  }).then(function(me){
+    if (!me) return null;
+    STATE.userId = me.id;
+    STATE.me = me;
+    try { localStorage.setItem('af_user_id', me.id); } catch(e){}
+    return me;
   });
+}
+
+// Shown when this browser isn't signed in: a one-time code from a signed-in device (or, on the server's own
+// machine or with the owner token, the account this browser had before login existed).
+function renderSignIn(root){
+  clear(root);
+  var code = el('input', {type:'text', id:'login-code', autocomplete:'one-time-code', dir:'ltr', placeholder:'XXXX-XXXX-XXXX'});
+  var status = el('p', {class:'err muted', role:'status'});
+  var go1 = el('button', {class:'btn', text: t('auth.sign_in')});
+  go1.addEventListener('click', function(){
+    if (!code.value.trim()){ status.textContent = t('auth.code_needed'); return; }
+    go1.disabled = true; status.textContent = '';
+    api('/auth/login', {method:'POST', json:{code: code.value.trim()}}).then(function(){ boot(); })
+      .catch(function(e){ status.textContent = e.message; go1.disabled = false; });
+  });
+  var token = el('input', {type:'password', autocomplete:'off', dir:'ltr'});
+  var userId = el('input', {type:'number', min:'1', dir:'ltr'});
+  var oldId = null;
+  try { oldId = localStorage.getItem('af_user_id'); } catch(e){}
+  if (oldId) userId.value = oldId;
+  var claimStatus = el('p', {class:'err muted', role:'status'});
+  var claimBtn = el('button', {class:'btn ghost sm', text: t('auth.claim')});
+  claimBtn.addEventListener('click', function(){
+    claimBtn.disabled = true; claimStatus.textContent = '';
+    api('/auth/claim', {method:'POST', json:{user_id: Number(userId.value), owner_token: token.value || null}})
+      .then(function(){ boot(); })
+      .catch(function(e){ claimStatus.textContent = e.message; claimBtn.disabled = false; });
+  });
+  root.appendChild(el('div', {class:'card stack lang-chooser', role:'dialog', 'aria-labelledby':'signin-title'},
+    el('h2', {id:'signin-title', text: t('auth.title')}),
+    el('p', {class:'muted', text: t('auth.code_help')}),
+    el('label', {class:'f'}, t('auth.code'), code),
+    el('div', {class:'btn-row'}, go1), status,
+    el('details', {class:'advanced'}, el('summary', {text: t('auth.claim_title')}),
+      el('p', {class:'muted', text: t('auth.claim_help')}),
+      el('label', {class:'f'}, t('auth.account_number'), userId),
+      el('label', {class:'f'}, t('auth.owner_token'), token),
+      el('div', {class:'btn-row'}, claimBtn), claimStatus)));
 }
 
 function fetchWorkspaces(){ return api('/workspaces').then(function(ws){ STATE.workspaces = ws; return ws; }); }
@@ -1245,6 +1298,7 @@ function setPath(obj, path, value){
 
 function renderSettings(root){
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('nav.settings')})));
+  root.appendChild(accountCard());
   root.appendChild(preferencesCard());
   var scopePicker = el('div', {class:'tabs', role:'tablist'});
   var scopeExtra = el('div', {class:'card', id:'scope-extra'});
@@ -1449,6 +1503,50 @@ function renderSettings(root){
   }
 
   drawScopeExtra();
+}
+
+// Who is signed in, signing in another device with a one-time code, and (admin) handing a new account over.
+function accountCard(){
+  var me = STATE.me || {};
+  var card = el('div', {class:'card stack', id:'account-card'});
+  var codeBox = el('div', {class:'stack', role:'status'});
+  function showLoginCode(c, forEmail){
+    clear(codeBox);
+    codeBox.appendChild(el('p', {class:'muted', text: forEmail ? t('auth.code_for', {email: forEmail}) : t('auth.code_own')}));
+    codeBox.appendChild(el('code', {class:'login-code', dir:'ltr', text: c.code}));
+    codeBox.appendChild(el('p', {class:'muted', text: t('auth.code_expires', {time: fmtTime(c.expires_at)})}));
+  }
+  var codeBtn = el('button', {class:'btn ghost sm', text: t('auth.new_device')});
+  codeBtn.addEventListener('click', function(){
+    api('/auth/login-codes', {method:'POST', json:{}}).then(function(c){ showLoginCode(c); })
+      .catch(function(e){ clear(codeBox); codeBox.appendChild(el('p', {class:'err muted', text: e.message})); });
+  });
+  var outBtn = el('button', {class:'btn ghost sm', text: t('auth.sign_out')});
+  outBtn.addEventListener('click', function(){
+    api('/auth/logout', {method:'POST'}).then(function(){ STATE.userId = null; STATE.me = null; boot(); });
+  });
+  card.appendChild(el('h3', {text: t('auth.account')}));
+  card.appendChild(el('p', {class:'muted'}, el('span', {dir:'ltr', text: me.email || ''}),
+    me.is_admin ? el('span', {class:'chip', style:'margin-inline-start:8px', text: t('auth.admin')}) : null));
+  card.appendChild(el('div', {class:'btn-row'}, codeBtn, outBtn));
+  if (me.is_admin){
+    var email = el('input', {type:'email', dir:'ltr', placeholder:'name@example.com'});
+    var addStatus = el('p', {class:'err muted', role:'status'});
+    var addBtn = el('button', {class:'btn sm', text: t('auth.add_account')});
+    addBtn.addEventListener('click', function(){
+      if (!email.value.trim()){ addStatus.textContent = t('auth.email_needed'); return; }
+      addBtn.disabled = true; addStatus.textContent = '';
+      api('/users', {method:'POST', json:{email: email.value.trim()}}).then(function(u){
+        return api('/auth/login-codes', {method:'POST', json:{user_id: u.id}}).then(function(c){ showLoginCode(c, u.email); });
+      }).then(function(){ email.value = ''; addBtn.disabled = false; })
+        .catch(function(e){ addStatus.textContent = e.message; addBtn.disabled = false; });
+    });
+    card.appendChild(el('label', {class:'f'}, t('auth.add_account_label'), email));
+    card.appendChild(el('div', {class:'btn-row'}, addBtn));
+    card.appendChild(addStatus);
+  }
+  card.appendChild(codeBox);
+  return card;
 }
 
 // The owner's own display preferences: saved at once, to the account; they never touch a setting or a permission.
@@ -1667,17 +1765,23 @@ function boot(){
     root.addEventListener('focusin', rememberOriginal);
   }
   I18N.apply();
-  ensureUser().then(function(){
-    // Without the account's preferences the UI still works, in this browser's language.
-    return loadPreferences().catch(function(){ return null; });
-  }).then(function(p){
-    syncLanguagePicker();
-    if (p && !p.ui_locale && !I18N.storedLocale()){
-      clear(root);
-      renderLanguageChooser(root, function(){ route(); });
+  ensureUser().then(function(me){
+    if (!me){
+      // Not signed in: the language first if this browser never chose one (kept here only), then the sign-in.
+      if (!I18N.storedLocale()){ clear(root); renderLanguageChooser(root, function(){ renderSignIn(root); }, false); }
+      else renderSignIn(root);
       return;
     }
-    route();
+    // Without the account's preferences the UI still works, in this browser's language.
+    return loadPreferences().catch(function(){ return null; }).then(function(p){
+      syncLanguagePicker();
+      if (p && !p.ui_locale && !I18N.storedLocale()){
+        clear(root);
+        renderLanguageChooser(root, function(){ route(); }, true);
+        return;
+      }
+      route();
+    });
   }).catch(function(e){
     clear(root);
     root.appendChild(errorBox(t('boot.server_unreachable', {message: e.message}), boot));

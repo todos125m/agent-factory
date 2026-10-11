@@ -81,7 +81,7 @@ class PreferencesOut(BaseModel):
 
 
 class ProjectCreate(StorableIn):
-    owner_id: int
+    owner_id: int | None = None  # the signed-in account; another one is refused (app/routers/projects.py)
     workspace_id: int | None = None
     title: str = Field(max_length=limit(Project, "title"))
     goal: str

@@ -1,8 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.auth import current_user
 from app.blueprint import validate_blueprint
 
-router = APIRouter(tags=["blueprints"])
+# Stateless (nothing stored, no model call), but only for signed-in accounts like every other route.
+router = APIRouter(tags=["blueprints"], dependencies=[Depends(current_user)])
 
 
 @router.post("/blueprints/validate")

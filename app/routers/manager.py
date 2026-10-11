@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import chat, manager, storable
+from app.auth import current_user
+from app.models import User
 from app.db import get_session
 from app.errors import AppError, refused
 from app.gateway.providers import ProviderError
@@ -51,60 +53,60 @@ class ChatIn(BaseModel):
 
 
 @router.post("/plan")
-def create_plan(project_id: int, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)):
-    project = load_project(session, project_id)
+def create_plan(project_id: int, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)):
+    project = load_project(session, project_id, me)
     return _run(manager.create_plan, session, gateway, project)
 
 
 @router.post("/plan/approve")
-def approve_plan(project_id: int, session: Session = Depends(get_session)):
-    project = load_project(session, project_id)
+def approve_plan(project_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    project = load_project(session, project_id, me)
     return _run(manager.approve_plan, session, project)
 
 
 @router.post("/plan/reject")
 def reject_plan(
-    project_id: int, body: PlanReject, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+    project_id: int, body: PlanReject, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)
 ):
-    project = load_project(session, project_id)
+    project = load_project(session, project_id, me)
     return _run(manager.reject_plan, session, gateway, project, body.feedback)
 
 
 @router.post("/tasks/{tid}/checkpoint")
 def create_checkpoint(
-    project_id: int, tid: int, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+    project_id: int, tid: int, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)
 ):
-    project = load_project(session, project_id)
-    task = load_task(session, project_id, tid)
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
     return _run(manager.create_checkpoint, session, gateway, project, task)
 
 
 @router.post("/tasks/{tid}/decide", response_model=TaskOut)
-def decide(project_id: int, tid: int, body: DecisionIn, session: Session = Depends(get_session)):
-    project = load_project(session, project_id)
-    task = load_task(session, project_id, tid)
+def decide(project_id: int, tid: int, body: DecisionIn, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
     _run(manager.decide, session, project, task, body.option, body.note)
     return task
 
 
 @router.post("/tasks/{tid}/run", response_model=TaskRunResultOut)
 def run_task(
-    project_id: int, tid: int, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+    project_id: int, tid: int, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)
 ):
-    project = load_project(session, project_id)
-    task = load_task(session, project_id, tid)
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
     return _run(manager.run_task, session, gateway, project, task)
 
 
 @router.post("/chat", response_model=ChatTurnOut)
 def send_chat(
-    project_id: int, body: ChatIn, session: Session = Depends(get_session), gateway: Gateway = Depends(get_gateway)
+    project_id: int, body: ChatIn, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)
 ):
-    project = load_project(session, project_id)
+    project = load_project(session, project_id, me)
     return _run(chat.send_message, session, gateway, project, body.text)
 
 
 @router.get("/chat", response_model=list[ChatMessageOut])
-def list_chat(project_id: int, session: Session = Depends(get_session)):
-    project = load_project(session, project_id)
+def list_chat(project_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    project = load_project(session, project_id, me)
     return chat.list_messages(session, project)
