@@ -12,7 +12,7 @@ from app.models import Project, RiskLevel, SettingsLayer, SettingsScope
 from app.registry import MODEL_ROLES
 from app.routers.manager import get_gateway
 from app.schemas import MAX_BUDGET_USD, ApprovalsLayer, BudgetLayer, ContextLayer, ModelRouteLayer, SettingsLayerIn
-from app.settings_layers import DEFAULTS
+from app.settings_layers import DEFAULTS, DERIVED_KEYS
 from tests import postgres_limits
 from tests.test_manager import CHECKPOINT, GOOD_PLAN, _ready_task, register_researcher, use_fake
 
@@ -158,7 +158,11 @@ def test_valid_partial_layer_is_stored_exactly_as_sent(client, project, body):
 def test_every_field_the_web_form_sets_is_accepted_and_resolved(client, project):
     pid = project["id"]
     full = {
-        "mode": "manual_learning",
+        "mode": "automatic",  # manual_learning would clamp the policies below to step_by_step (its own ceiling)
+        "interaction_policy": "milestone",
+        "max_interaction_policy": "delegated_bounded",
+        "quality_target": "production_candidate",
+        "output_locale": "en",
         "depth": "deep",
         "max_steps": 8,
         "models": {role: {"provider": "anthropic", "model": "claude-sonnet-5", "effort": "low"} for role in MODEL_ROLES},
@@ -182,7 +186,7 @@ def test_emptied_nested_dict_inherits_again(client, project):
 def test_schema_mirrors_defaults():
     """Drift guard: every key in DEFAULTS is validated, and the defaults are themselves a valid layer."""
     SettingsLayerIn.model_validate(DEFAULTS)
-    assert set(SettingsLayerIn.model_fields) == set(DEFAULTS)
+    assert set(SettingsLayerIn.model_fields) == set(DEFAULTS) | DERIVED_KEYS
     for key, part in {"approvals": ApprovalsLayer, "budget": BudgetLayer, "context": ContextLayer}.items():
         assert set(part.model_fields) == set(DEFAULTS[key])
     assert set(ApprovalsLayer.model_fields) == {r.value for r in RiskLevel}

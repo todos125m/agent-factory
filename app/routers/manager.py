@@ -1,11 +1,12 @@
 from typing import Any, Callable, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import chat, manager, storable
 from app.db import get_session
+from app.errors import AppError, refused
 from app.gateway.providers import ProviderError
 from app.gateway.service import BudgetExceeded, Gateway
 from app.manager import ManagerError
@@ -27,13 +28,13 @@ def _run(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     try:
         return fn(*args, **kwargs)
     except ManagerError as e:
-        raise HTTPException(422, str(e)) from e
+        raise AppError(422, "request_refused", str(e)) from e
     except BudgetExceeded as e:
-        raise HTTPException(402, str(e)) from e
+        raise AppError(402, "budget_exceeded", str(e)) from e
     except ProviderError as e:  # its text can quote a model's: JSON can't carry a lone surrogate
-        raise HTTPException(502, storable.clean(str(e))) from e
+        raise AppError(502, "provider_unavailable", storable.clean(str(e))) from e
     except (TransitionError, ProjectPaused) as e:  # every route here is refused while paused
-        raise HTTPException(409, str(e)) from e
+        raise refused(e) from e
 
 
 class PlanReject(storable.StorableIn):  # the owner's text, refused before the re-plan's paid call

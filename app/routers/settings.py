@@ -1,12 +1,13 @@
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import settings_layers
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Project, SettingsLayer, SettingsScope, Task, Workspace
 from app.schemas import SettingsLayerIn, SettingsLayerOut, WorkspaceCreate, WorkspaceOut
 
@@ -42,9 +43,9 @@ def resolved_settings(
 def _check_scope(session: Session, scope: SettingsScope, scope_id: int) -> None:
     if scope is SettingsScope.GLOBAL:
         if scope_id != 0:
-            raise HTTPException(422, "The global layer uses scope_id 0")
+            raise AppError(422, "invalid_request", "The global layer uses scope_id 0")
     elif not session.get(SCOPE_MODELS[scope], scope_id):
-        raise HTTPException(404, f"{scope.value} {scope_id} not found")
+        raise not_found(scope.value, f"{scope.value} {scope_id} not found")
 
 
 @router.get("/settings/{scope}/{scope_id}", response_model=SettingsLayerOut)
@@ -89,7 +90,7 @@ def put_settings_layer(
     try:
         SettingsLayerIn.model_validate(values)
     except ValidationError as e:
-        raise HTTPException(422, _describe_invalid(e)) from e
+        raise AppError(422, "settings_invalid", _describe_invalid(e)) from e
     layer = settings_layers.get_layer(session, scope, scope_id) or SettingsLayer(scope=scope, scope_id=scope_id)
     layer.values = values
     session.add(layer)

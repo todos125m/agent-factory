@@ -9,8 +9,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import sources
+from app import errors, sources
 from app.db import Base, SessionLocal, engine, ensure_column_lengths, ensure_indexes
 from app.registry import sync_from_files
 from app.routers import agents, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users
@@ -51,7 +52,15 @@ async def request_validation_error(_: Request, exc: RequestValidationError) -> J
     """FastAPI's default 422, except that a NaN/Infinity input (Python's JSON parser accepts both) is echoed as text
     and a lone surrogate is escaped: the default handler can't serialize either and answered 500 instead."""
     detail = jsonable_encoder(exc.errors(), custom_encoder=_NON_FINITE_AS_TEXT)
-    return _AsciiJSONResponse(status_code=422, content={"detail": detail})
+    return _AsciiJSONResponse(status_code=422, content=errors.body(422, detail, "invalid_request"))
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Every HTTP error carries a `code` (app/errors.py): its own if raised as an AppError, else one by status."""
+    code, params = (exc.code, exc.params) if isinstance(exc, errors.AppError) else (None, None)
+    content = jsonable_encoder(errors.body(exc.status_code, exc.detail, code, params))
+    return JSONResponse(status_code=exc.status_code, content=content, headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(TransitionError)
@@ -59,7 +68,8 @@ async def request_validation_error(_: Request, exc: RequestValidationError) -> J
 async def transition_error(_: Request, exc: Exception) -> JSONResponse:
     """409 on any route, as the routers that map it themselves answer: incl. a pause refusal (ProjectPaused,
     app/pause.py) on a path that neither checked the pause nor maps the refusal, instead of a 500."""
-    return JSONResponse(status_code=409, content={"detail": str(exc)})
+    error = errors.refused(exc)
+    return JSONResponse(status_code=409, content=errors.body(409, error.detail, error.code))
 
 
 app.include_router(users.router)

@@ -7,6 +7,10 @@ A model is only ever used off to the side, to turn one free-text answer into its
 Question files: `registry/interview/*.yaml`, loaded in filename order (most decisive sections first).
 Each file has `section`, an optional section-level `depends_on`, and `questions` (each with `id`,
 `text`, `type`, `target`, optional `options` / question-level `depends_on` / `note`).
+
+`text`, an option's `label` and `note` are `{fa, en, tr}`: the question shown is in the owner's UI language, English
+when a text lacks it. Answers are keyed by `target`, never by wording, so changing the language mid-interview keeps
+every answer and the place in the interview.
 """
 
 from pathlib import Path
@@ -14,7 +18,11 @@ from typing import Any
 
 import yaml
 
+from app.preferences import DEFAULT_LOCALE
+
 INTERVIEW_DIR = Path(__file__).resolve().parent.parent / "registry" / "interview"
+FALLBACK_LOCALE = "en"
+LOCALIZED_FIELDS = ("text", "note")
 
 # Fields the interview collects as free text but the blueprint schema expects as arrays.
 LIST_FIELDS = {
@@ -62,16 +70,28 @@ def _condition_met(condition: dict[str, list[Any]] | None, answers: dict[str, An
     return all(answers.get(key) in allowed for key, allowed in condition.items())
 
 
-def next_question(answers: dict[str, Any], questions: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    """The next unanswered question whose condition holds, or None when the interview is complete."""
+def localized(value: Any, locale: str) -> Any:
+    """`value` in `locale`, else English, else any language it has; a plain string is returned as it is."""
+    if not isinstance(value, dict):
+        return value
+    return value.get(locale) or value.get(FALLBACK_LOCALE) or next(iter(value.values()), "")
+
+
+def next_question(
+    answers: dict[str, Any], questions: list[dict[str, Any]] | None = None, locale: str = DEFAULT_LOCALE
+) -> dict[str, Any] | None:
+    """The next unanswered question whose condition holds, in `locale`, or None when the interview is complete."""
     for q in questions if questions is not None else load_questions():
         if q["target"] in answers:
             continue
         if not _condition_met(q.get("depends_on"), answers):
             continue
-        visible = dict(q)
+        visible = {k: localized(v, locale) if k in LOCALIZED_FIELDS else v for k, v in q.items()}
         if "options" in visible:
-            visible["options"] = [o for o in visible["options"] if _condition_met(o.get("depends_on"), answers)]
+            visible["options"] = [
+                {**o, "label": localized(o.get("label"), locale)}
+                for o in visible["options"] if _condition_met(o.get("depends_on"), answers)
+            ]
         return visible
     return None
 

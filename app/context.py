@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import settings_layers
+from app import preferences, settings_layers
 from app.models import Agent, MemoryItem, RunEvent, Skill, Task
 
 
@@ -63,6 +63,8 @@ def task_context(
         f"Project goal: {task.project.goal}",
         f"Task: {task.title}\nInput: {json.dumps(task.input, ensure_ascii=False, sort_keys=True)}",
     ]
+    if language := preferences.reply_language_line(session, task.project, settings["output_locale"]):
+        sections.append(language)
     if extra:
         sections.append(extra)
     # §24: retrieve only what's relevant, never the whole project memory — here, recency (§53: no

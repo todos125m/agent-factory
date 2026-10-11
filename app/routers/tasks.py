@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.errors import AppError, not_found, refused
 from app.events import record_event
 from app.models import Task, TaskDependency, TaskStatus
 from app.pause import check_task_move, commit_unless_paused
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/projects/{project_id}/tasks", tags=["tasks"])
 def load_task(session: Session, project_id: int, task_id: int) -> Task:
     task = session.get(Task, task_id)
     if not task or task.project_id != project_id:
-        raise HTTPException(404, "Task not found")
+        raise not_found("task")
     return task
 
 
@@ -33,7 +34,8 @@ def create_task(project_id: int, body: TaskCreate, session: Session = Depends(ge
     if dep_ids:
         found = set(session.scalars(select(Task.id).where(Task.id.in_(dep_ids), Task.project_id == project_id)))
         if missing := dep_ids - found:
-            raise HTTPException(422, f"Unknown dependencies in this project: {sorted(missing)}")
+            raise AppError(422, "unknown_dependencies", f"Unknown dependencies in this project: {sorted(missing)}",
+                           task_ids=sorted(missing))
     # A new task can only point at existing tasks, so it can never close a cycle;
     # the DAG invariant (§22) holds by construction.
     task = Task(project_id=project_id, **body.model_dump(exclude={"depends_on"}))
@@ -78,7 +80,7 @@ def transition_task(project_id: int, task_id: int, body: TaskTransition, session
     try:
         check_task_move(session, task, body.status, dependency_statuses=dependency_statuses(session, task))
     except TransitionError as e:
-        raise HTTPException(409, str(e)) from e
+        raise refused(e) from e
 
     previous = task.status
     if previous is TaskStatus.FAILED and body.status is TaskStatus.READY:

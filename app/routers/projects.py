@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -6,6 +6,7 @@ from app import manager
 from app import memory as memory_module
 from app import settings_layers
 from app.db import get_session
+from app.errors import not_found, refused
 from app.events import record_event
 from app.models import LearningTrace, MemoryCategory, MemoryItem, ModelCall, Project, RunEvent, Task, User, Workspace
 from app.schemas import (
@@ -20,16 +21,16 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 def load_project(session: Session, project_id: int) -> Project:
     project = session.get(Project, project_id)
     if not project:
-        raise HTTPException(404, "Project not found")
+        raise not_found("project")
     return project
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
 def create_project(body: ProjectCreate, session: Session = Depends(get_session)):
     if not session.get(User, body.owner_id):
-        raise HTTPException(404, "Owner not found")
+        raise not_found("user", "Owner not found")
     if body.workspace_id is not None and not session.get(Workspace, body.workspace_id):
-        raise HTTPException(404, "Workspace not found")
+        raise not_found("workspace")
     project = Project(**body.model_dump())
     session.add(project)
     session.flush()
@@ -58,7 +59,7 @@ def advance_stage(project_id: int, body: ProjectStageUpdate, session: Session = 
         manager.ensure_active(session, project, "stage", to=body.stage.value)
         check_project_advance(project.stage, body.stage)
     except TransitionError as e:
-        raise HTTPException(409, str(e)) from e
+        raise refused(e) from e
     record_event(session, project.id, "project.stage_changed", **{"from": project.stage.value, "to": body.stage.value})
     project.stage = body.stage
     session.commit()
@@ -125,7 +126,7 @@ def create_memory(project_id: int, body: MemoryItemCreate, session: Session = De
     if body.task_id is not None:
         task = session.get(Task, body.task_id)
         if not task or task.project_id != project_id:
-            raise HTTPException(404, "Task not found in this project")
+            raise not_found("task", "Task not found in this project")
     return memory_module.add_memory_item(
         session, project, body.category, body.title, body.content, task_id=body.task_id
     )

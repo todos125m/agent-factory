@@ -129,3 +129,71 @@ def test_empty_name_and_description_fail_validation():
     issues = validate_blueprint(blueprint)
     assert any(i.startswith("agent_core.name") for i in issues)
     assert any(i.startswith("agent_core.description") for i in issues)
+
+
+# ---------- the interview in the owner's language (fa / en / tr) ----------
+
+LOCALES = ("fa", "en", "tr")
+
+
+def test_every_question_option_and_note_has_all_three_languages():
+    for q in load_questions():
+        for field in ("text", "note"):
+            if field in q:
+                assert set(q[field]) == set(LOCALES) and all(q[field][loc].strip() for loc in LOCALES), (q["id"], field)
+        for o in q.get("options", []):
+            assert set(o["label"]) == set(LOCALES) and all(o["label"][loc].strip() for loc in LOCALES), (q["id"], o["value"])
+
+
+def test_question_is_shown_in_the_requested_language(client):
+    fa = client.get("/interview", params={"locale": "fa"}).json()["question"]
+    en = client.get("/interview", params={"locale": "en"}).json()["question"]
+    tr = client.get("/interview", params={"locale": "tr"}).json()["question"]
+    assert fa["target"] == en["target"] == tr["target"] == "agent_core.agent_type"
+    assert en["text"].startswith("Is this agent") and tr["text"].startswith("Bu ajan")
+    assert "Agent" in fa["text"] and fa["text"] != en["text"]
+    assert [o["value"] for o in en["options"]] == [o["value"] for o in fa["options"]]
+    assert all(isinstance(o["label"], str) for o in tr["options"])
+
+
+def test_changing_language_mid_interview_keeps_the_answers_and_the_place(client):
+    first = client.post("/interview/answer", json={"answers": {}, "target": "agent_core.agent_type",
+                                                   "value": "specialist", "locale": "fa"}).json()
+    answers = first["answers"]
+    again = client.post("/interview/answer", json={"answers": answers, "target": "agent_core.name",
+                                                   "value": "ticket_triage", "locale": "en"}).json()
+    assert again["answers"] == {"agent_core.agent_type": "specialist", "agent_core.name": "ticket_triage"}
+    assert again["question"]["target"] == "agent_core.description"
+    assert again["question"]["text"].startswith("What exactly")
+    import json as _json
+    tr = client.get("/interview", params={"answers": _json.dumps(again["answers"]), "locale": "tr"}).json()
+    assert tr["question"]["target"] == "agent_core.description" and tr["question"]["text"].startswith("Bu ajan")
+
+
+def test_an_unknown_locale_falls_back_to_the_default(client):
+    q = client.get("/interview", params={"locale": "de"}).json()["question"]
+    assert q["text"] == client.get("/interview", params={"locale": "fa"}).json()["question"]["text"]
+
+
+def test_a_text_missing_a_language_falls_back_to_english():
+    from app.interview import localized
+
+    assert localized({"fa": "x", "en": "y"}, "tr") == "y"
+    assert localized({"fa": "x"}, "tr") == "x"
+    assert localized("plain", "en") == "plain"
+
+
+def test_malformed_interview_input_is_a_422_not_a_500(client):
+    assert client.get("/interview", params={"answers": "[1, 2]"}).status_code == 422
+    assert client.post("/interview/answer", json={"answers": [1], "target": "x", "value": 1}).status_code == 422
+    assert client.post("/interview/answer", json={"answers": {}, "target": ["x"], "value": 1}).status_code == 422
+
+
+def test_state_is_restored_by_post_so_answers_never_travel_in_a_url(client):
+    long_answer = "توضیح " * 4000  # ~28K characters: far past any request-line limit as a GET
+    answers = {"agent_core.agent_type": "specialist", "agent_core.name": "x", "agent_core.description": long_answer}
+    r = client.post("/interview/state", json={"answers": answers, "locale": "en"})
+    assert r.status_code == 200
+    assert r.json()["question"]["target"] == "agent_core.model_role"
+    assert r.json()["question"]["text"].startswith("Which model role")
+    assert client.post("/interview/state", json={"answers": [1]}).status_code == 422

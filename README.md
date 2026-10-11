@@ -30,6 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
+| Human-guided factory (Issue #2) | PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -167,6 +168,7 @@ which question comes next and how answers become a blueprint are pure code. The 
 | GET | `/workspaces` | List workspaces |
 | GET/PUT | `/settings/{global\|workspace\|project\|task}/{id}` | Read / replace one settings layer (global id = 0) |
 | GET | `/settings/resolved?task_id=` | Effective settings: defaults ← global ← workspace ← project's own `mode`/`budget` ← project layer ← task's own `mode` (if set) ← task layer |
+| GET/PATCH | `/users/{id}/preferences` | The owner's display preferences: `ui_locale` (fa/en/tr), `audience_level` (ordinary/professional/developer), `code_visibility`; `null` = not chosen yet, `effective` = what the UI uses. Display only — grants nothing |
 | GET | `/agents`, `/agents/{name}`, `?capability=` | Agent registry; POST `/agents` registers after validation |
 | GET | `/skills`, `/skills/{name}` | Skills (summary / full body) |
 | GET | `/projects/{id}/usage` | Tokens, cost and budget for a project |
@@ -180,6 +182,34 @@ together with the paid calls already in flight, and held while it runs: calls st
 checked against one another, a refusal is `budget.exceeded` (402), and a hold left by a process that stopped
 mid-call stops counting after `HOLD_TTL`. Nothing (no transaction, no SQLite write lock) stays open while a model
 runs. `app/context.py` builds the smallest prompt a call needs.
+
+### Interaction policy, quality target, reply language (settings layers)
+
+`interaction_policy` is how often the system stops for the owner — every mode is interactive (`docs/HUMAN_GUIDED_FACTORY.md`):
+`step_by_step` (every step; the default for building an agent), `milestone` (the main points), `delegated_bounded` (only
+inside an approved scope, stopping on ambiguity). Unless a layer sets it, it follows the project's `mode`
+(`manual_learning` → `step_by_step`, which no layer can loosen; `automatic` → `milestone`). `max_interaction_policy` is a
+ceiling: the strictest one any layer sets wins, so a project or task can't loosen an owner-wide limit; anything unknown
+counts as `step_by_step`. A checkpoint is auto-decided only when mode is `automatic`, the policy isn't `step_by_step` and
+the risk's approval rule allows it. `quality_target` (`prototype` / `production_candidate`) sets evaluation depth, never
+authority. `output_locale` (`auto` = the owner's UI language, or `fa`/`en`/`tr`) adds a `Reply language: …` line to the
+plan, chat and task prompts (user content only, so system prompts stay cacheable); none when the owner never chose a
+language.
+
+### Errors
+
+Every error body is `{"detail": …, "code": …, "params": {…}}` (`app/errors.py`): `detail` stays English (logs, existing
+clients); the UI shows `code` in the owner's language (`web/i18n.js`, `err.<code>`), plus the detail when it carries the
+reason. Codes: `not_found` (`params.resource`), `invalid_request`, `settings_invalid`, `unknown_dependencies`,
+`agent_invalid`, `request_refused`, `email_taken`, `transition_refused`, `project_paused`, `budget_exceeded`,
+`provider_unavailable`; a plain HTTP error gets one by status.
+
+### Languages
+
+The UI speaks Persian, English and Turkish (`web/i18n.js`, key-based, English fallback; `app.js` holds no text). The
+language is chosen on first entry and changed from the top bar or Settings; it is stored on the account (this browser
+only if the server can't be reached) and changing it resets no answer, approval or stage. Interview questions carry
+`{fa, en, tr}` text (`GET /interview?locale=`); answers are keyed by target, so changing language mid-interview keeps them.
 
 ### Model access
 

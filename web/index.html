@@ -20,13 +20,13 @@
   <aside class="sidebar">
     <div class="brand"><b>Agent Factory</b><span>AI Venture Team</span></div>
     <nav class="nav" id="nav">
-      <button class="nav-item" data-page="dashboard"><span class="ic">📊</span>داشبورد</button>
-      <button class="nav-item" data-page="inbox"><span class="ic">📥</span>صندوق تصمیم‌ها<span class="badge" id="inbox-badge" hidden>0</span></button>
-      <button class="nav-item" data-page="projects"><span class="ic">📁</span>پروژه‌ها</button>
-      <button class="nav-item" data-page="agents"><span class="ic">🤖</span>ایجنت‌ها</button>
-      <button class="nav-item" data-page="benchmark"><span class="ic">📈</span>سنجش</button>
-      <button class="nav-item" data-page="settings"><span class="ic">⚙️</span>تنظیمات</button>
-      <button class="nav-item" data-page="observability"><span class="ic">👁️</span>مشاهده‌پذیری</button>
+      <button class="nav-item" data-page="dashboard"><span class="ic" aria-hidden="true">📊</span><span data-i18n="nav.dashboard">داشبورد</span></button>
+      <button class="nav-item" data-page="inbox"><span class="ic" aria-hidden="true">📥</span><span data-i18n="nav.inbox">صندوق تصمیم‌ها</span><span class="badge" id="inbox-badge" hidden>0</span></button>
+      <button class="nav-item" data-page="projects"><span class="ic" aria-hidden="true">📁</span><span data-i18n="nav.projects">پروژه‌ها</span></button>
+      <button class="nav-item" data-page="agents"><span class="ic" aria-hidden="true">🤖</span><span data-i18n="nav.agents">ایجنت‌ها</span></button>
+      <button class="nav-item" data-page="benchmark"><span class="ic" aria-hidden="true">📈</span><span data-i18n="nav.benchmark">سنجش</span></button>
+      <button class="nav-item" data-page="settings"><span class="ic" aria-hidden="true">⚙️</span><span data-i18n="nav.settings">تنظیمات</span></button>
+      <button class="nav-item" data-page="observability"><span class="ic" aria-hidden="true">👁️</span><span data-i18n="nav.observability">مشاهده‌پذیری</span></button>
     </nav>
   </aside>
 
@@ -34,12 +34,15 @@
     <header class="topbar">
       <h1>Agent Factory</h1>
       <div class="spacer"></div>
-      <span class="pill">کارخانه‌ی ایجنت</span>
+      <select id="lang-picker" class="lang-picker" aria-label="Language / زبان / Dil"></select>
+      <span class="pill" data-i18n="app.subtitle">کارخانه‌ی ایجنت</span>
     </header>
+    <div id="notice" class="notice" role="status" hidden></div>
     <main id="page-root"></main>
   </div>
 </div>
 
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

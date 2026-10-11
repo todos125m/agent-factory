@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_va
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import context, memory, settings_layers, sources, storable
+from app import context, memory, preferences, settings_layers, sources, storable
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
@@ -202,6 +202,8 @@ def _plan_user_content(session: Session, project: Project, feedback: str | None)
     ]
     if feedback:
         lines.append(f"Feedback on the previous plan — revise accordingly: {feedback}")
+    if language := preferences.reply_language_line(session, project, settings["output_locale"]):
+        lines.append(language)
     return "\n".join(lines)
 
 
@@ -370,8 +372,10 @@ def create_checkpoint(session: Session, gateway: Gateway, project: Project, task
     settings = settings_layers.resolve(session, task_id=task.id)
     approvals = settings.get("approvals")
     rule = approvals.get(task.risk.value) if isinstance(approvals, dict) else None
-    # Allowlist, not `!= "user"`: an unknown or malformed rule (e.g. a stored typo) waits for the owner.
-    auto = settings["mode"] == "automatic" and rule in ("auto", "manager")
+    # Allowlist, not `!= "user"`: an unknown or malformed rule (e.g. a stored typo) waits for the owner. A step_by_step
+    # interaction policy (resolved, so clamped by every layer above and the mode) waits for the owner at every step.
+    auto = (settings["mode"] == "automatic" and settings["interaction_policy"] != "step_by_step"
+            and rule in ("auto", "manager"))
     if auto:
         # The project row is locked before the checkpoint above is flushed, the task row after it (app/pause.py).
         if _paused_now(session, project):

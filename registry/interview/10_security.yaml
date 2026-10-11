@@ -1,33 +1,57 @@
 section: security
 questions:
-  - id: security.permissions.network
-    text: "این Agent اجازه‌ی دسترسی به شبکه/اینترنت را دارد؟"
-    type: confirm
-    target: security.permissions.network
-    recommended: false
-  - id: security.permissions.repo_write
-    text: "این Agent اجازه‌ی نوشتن در مخزن کد را دارد؟"
-    type: confirm
-    target: security.permissions.repo_write
-    recommended: false
-  - id: security.permissions.deploy
-    text: "این Agent اجازه‌ی دیپلوی دارد؟"
-    type: confirm
-    target: security.permissions.deploy
-    recommended: false
-  - id: security.budget.max_cost
-    text: "سقف بودجه‌ی این Agent برای هر اجرا چقدر باشد؟ (دلار، عدد)"
-    type: text
-    target: security.budget.max_cost
-  - id: security.data_classification
-    text: "داده‌ای که این Agent با آن کار می‌کند چه حساسیتی دارد؟"
-    type: single_choice
-    target: security.data_classification
-    options:
-      - value: internal
-        label: "internal"
-        recommended: true
-      - value: public
-        label: "public"
-      - value: sensitive
-        label: "sensitive"
+- id: security.permissions.network
+  text:
+    fa: این Agent اجازه‌ی دسترسی به شبکه/اینترنت را دارد؟
+    en: May this agent access the network / internet?
+    tr: Bu ajan ağa / internete erişebilir mi?
+  type: confirm
+  target: security.permissions.network
+  recommended: false
+- id: security.permissions.repo_write
+  text:
+    fa: این Agent اجازه‌ی نوشتن در مخزن کد را دارد؟
+    en: May this agent write to the code repository?
+    tr: Bu ajan kod deposuna yazabilir mi?
+  type: confirm
+  target: security.permissions.repo_write
+  recommended: false
+- id: security.permissions.deploy
+  text:
+    fa: این Agent اجازه‌ی دیپلوی دارد؟
+    en: May this agent deploy?
+    tr: Bu ajan yayına alma (deploy) yapabilir mi?
+  type: confirm
+  target: security.permissions.deploy
+  recommended: false
+- id: security.budget.max_cost
+  text:
+    fa: سقف بودجه‌ی این Agent برای هر اجرا چقدر باشد؟ (دلار، عدد)
+    en: What is this agent's budget cap per run? (dollars, a number)
+    tr: Bu ajanın çalıştırma başına bütçe üst sınırı ne olsun? (dolar, sayı)
+  type: text
+  target: security.budget.max_cost
+- id: security.data_classification
+  text:
+    fa: داده‌ای که این Agent با آن کار می‌کند چه حساسیتی دارد؟
+    en: How sensitive is the data this agent works with?
+    tr: Bu ajanın çalıştığı veriler ne kadar hassas?
+  type: single_choice
+  target: security.data_classification
+  options:
+  - value: internal
+    label:
+      fa: internal
+      en: internal
+      tr: internal (dahili)
+    recommended: true
+  - value: public
+    label:
+      fa: public
+      en: public
+      tr: public (herkese açık)
+  - value: sensitive
+    label:
+      fa: sensitive
+      en: sensitive
+      tr: sensitive (hassas)
