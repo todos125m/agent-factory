@@ -184,12 +184,16 @@ class TaskDependency(Base):
 
 
 class RunEvent(Base):
-    """Append-only audit log: every state transition is recorded here (§23, §49)."""
+    """Append-only audit log: every state transition is recorded here (§23, §49) — a project's, or an agent-building
+    session's (`factory_session_id`, app/factory.py): exactly one of the two is set."""
 
     __tablename__ = "run_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    factory_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True
+    )
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     type: Mapped[str] = mapped_column(String(100))
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -378,4 +382,89 @@ class BudgetHold(Base):
     # project's in-flight spend, along; the hold keeps counting against the project until the call finishes.
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     usd: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactoryStage(str, enum.Enum):
+    """Building one agent (docs/HUMAN_GUIDED_FACTORY.md §5). Not the Task state machine: this is the build's own."""
+
+    DRAFT = "DRAFT"
+    CLARIFYING = "CLARIFYING"
+    AWAITING_BRIEF_APPROVAL = "AWAITING_BRIEF_APPROVAL"
+    DESIGNING = "DESIGNING"
+    AWAITING_DESIGN_APPROVAL = "AWAITING_DESIGN_APPROVAL"
+    BUILDING = "BUILDING"
+    EVALUATING = "EVALUATING"
+    AWAITING_ACTIVATION_APPROVAL = "AWAITING_ACTIVATION_APPROVAL"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    BLOCKED = "BLOCKED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class FactorySession(Base):
+    """One owner building one agent with the factory (app/factory.py). `revision` grows with every change: a request
+    that names an older one is refused (409), so a second tab or a late answer can't overwrite what it didn't see."""
+
+    __tablename__ = "factory_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    stage: Mapped[str] = mapped_column(String(40), default=FactoryStage.DRAFT.value)
+    stage_before_pause: Mapped[str | None] = mapped_column(String(40))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    # The language its proposals were written in (the owner's UI language when it was made); questions follow the UI.
+    locale: Mapped[str] = mapped_column(String(8))
+    interaction_policy: Mapped[str] = mapped_column(String(30))
+    quality_target: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class BriefRevision(Base):
+    """An immutable version of a session's brief: every field as {value, status, source, revision}. A change is a new
+    row, never an edit, so an approval names exactly what was approved."""
+
+    __tablename__ = "brief_revisions"
+    __table_args__ = (UniqueConstraint("session_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Approval(Base):
+    """A decision by a signed-in account on one exact version of one thing (the brief, in PR2). It stops counting the
+    moment that thing changes (`invalidated_at`): nothing approves a version it wasn't given."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    stage: Mapped[str] = mapped_column(String(40))
+    resource: Mapped[str] = mapped_column(String(30))  # "brief"
+    resource_version: Mapped[int] = mapped_column(Integer)
+    scope: Mapped[list[str]] = mapped_column(JSON, default=list)  # the brief fields it covers
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidated_reason: Mapped[str | None] = mapped_column(String(100))
+
+
+class FactoryRequest(Base):
+    """A request id already applied (app/factory.py): the same request again — a double click, a retry after a lost
+    answer — changes nothing a second time."""
+
+    __tablename__ = "factory_requests"
+    __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    request_id: Mapped[str] = mapped_column(String(64))
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

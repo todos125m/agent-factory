@@ -170,3 +170,12 @@ pre.code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:v
 code,pre,input[type=number]{unicode-bidi:plaintext}
 .notice{margin:12px 20px 0;padding:10px 14px;border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--warn);font-size:13px}
 .login-code{font-size:22px;font-weight:800;letter-spacing:2px;padding:8px 12px;background:var(--surface-2);border-radius:var(--radius-sm);align-self:flex-start}
+.stepbar{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0}
+.stepbar .step{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px dashed var(--line);color:var(--muted);font-size:13px}
+.stepbar .step.done{border-style:solid;color:var(--ink)}
+.stepbar .step.now{border:2px solid var(--accent);color:var(--ink);font-weight:800}
+.brief-row{border-top:1px solid var(--line);padding-top:8px}
+.chip.status-draft{border:1px dashed var(--line)}
+.chip.status-proposed{border:1px dashed var(--warn)}
+.chip.status-confirmed{background:var(--good-soft);color:var(--good)}
+textarea#build-answer{min-height:80px}

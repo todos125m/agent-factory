@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
+| Human-guided factory (Issue #2) | PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -204,6 +204,26 @@ clients); the UI shows `code` in the owner's language (`web/i18n.js`, `err.<code
 reason. Codes: `not_found` (`params.resource`), `invalid_request`, `settings_invalid`, `unknown_dependencies`,
 `agent_invalid`, `request_refused`, `email_taken`, `transition_refused`, `project_paused`, `budget_exceeded`,
 `provider_unavailable`; a plain HTTP error gets one by status.
+
+### Building an agent: the intake and the brief (issue #2 PR2, owner decision d28)
+
+"+ New agent" opens a build (`/factory/sessions`, app/factory.py, questions in `registry/factory/brief.yaml`, fa/en/tr):
+one sentence ("what, for whom, what should it do?"), then five short questions (who, the problem, a real input, the
+expected output, one measurable criterion), one per turn; limits, sources, permissions and budget are proposed. Each
+question offers "I don't know — suggest"; a vague answer is asked again; a contradiction (the web mentioned, internet
+forbidden) becomes the next question. Every change is a new immutable brief version with each field's status
+(draft / proposed / confirmed) and source (user / default / suggestion / unknown). Approving binds to one exact version
+(`brief_version`) and confirms it; changing anything afterwards invalidates that approval. Every change names the
+build's `expected_revision` (another tab's change in between is a 409 `stale_revision`) and a `request_id` (a double
+click applies once). Pause / resume / cancel; every change is a RunEvent with its actor. No model call: deterministic.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST | `/factory/sessions` | Your builds / start one (`request_id`) |
+| GET | `/factory/sessions/{id}?locale=` | Stage, brief, next question, "our understanding" summary, approval |
+| POST | `/factory/sessions/{id}/answer` | `{field, value | dont_know, expected_revision, request_id}` |
+| POST | `/factory/sessions/{id}/approve` | `{brief_version, expected_revision, request_id}` |
+| POST | `/factory/sessions/{id}/request-changes`, `/pause`, `/cancel` | |
 
 ### Sign-in and access (owner decision d33)
 

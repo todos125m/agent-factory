@@ -122,7 +122,7 @@ def test_every_route_but_the_open_ones_needs_a_session(raw):
             if (method.upper(), path) in OPEN_ROUTES:
                 continue
             concrete = path.replace("{scope}", "global")
-            for name in ("project_id", "tid", "task_id", "user_id", "run_id", "scope_id", "name"):
+            for name in ("project_id", "tid", "task_id", "user_id", "run_id", "scope_id", "name", "session_id"):
                 concrete = concrete.replace("{" + name + "}", "1")
             assert "{" not in concrete, path
             r = stranger.request(method.upper(), concrete, json={})

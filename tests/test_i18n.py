@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from app.models import MemoryCategory, ProjectStage, RiskLevel, TaskStatus
+from app.factory import field_specs
+from app.models import FactoryStage, MemoryCategory, ProjectStage, RiskLevel, TaskStatus
 from app.preferences import AUDIENCE_LEVELS, CODE_VISIBILITY, LOCALES
 from app.registry import MODEL_ROLES
 from app.settings_layers import INTERACTION_POLICIES, OUTPUT_LOCALES, QUALITY_TARGETS
@@ -95,7 +96,14 @@ LABELLED = {
     "level": list(AUDIENCE_LEVELS),
     "level_help": list(AUDIENCE_LEVELS),
     "code": list(CODE_VISIBILITY),
-    "resource": ["project", "task", "user", "workspace", "agent", "skill", "benchmark_run", "global", "item"],
+    "resource": ["project", "task", "user", "workspace", "agent", "skill", "benchmark_run", "global", "item",
+                 "factory_session"],
+    "fstatus": ["draft", "proposed", "confirmed"],
+    "fsource": ["user", "default", "suggestion", "unknown"],
+    "fstage": [s.value for s in FactoryStage],
+    "bfield": [s["field"] for s in field_specs()],
+    "build.step": ["understand", "brief", "design", "build", "evaluate", "active"],
+    "build.conflict": ["internet_vs_constraints"],
 }
 
 
@@ -106,7 +114,7 @@ def test_every_value_shown_with_a_label_has_one(group):
 
 
 def test_every_label_group_app_js_uses_is_checked():
-    groups = set(re.findall(r"lbl\('([\w.]+)'", _app())) | {"inbox.head", "level_help"}
+    groups = set(re.findall(r"lbl\('([\w.]+)'", _app())) | {"inbox.head", "level_help", "build.step", "build.conflict"}
     groups |= {g for g in re.findall(r"selectField\([^)]*?, '(\w+)'\)", _app())}
     assert groups - set(LABELLED) == set()
 

@@ -1,0 +1,136 @@
+# The brief an agent is built from (app/factory.py, docs/HUMAN_GUIDED_FACTORY.md §4; owner decision d28: one sentence
+# + a few short questions, the rest proposed). Asked in this order, one main question per turn; `critical` fields must
+# hold a value before the brief can be approved. `suggestion` is what "I don't know; suggest" proposes (none: the
+# field stays an open question). Fields that are not asked get `default` as a proposal the owner approves or edits.
+# `example` is shown to ordinary owners, `why` to professional and developer ones (developers also see the field key).
+fields:
+  - field: goal
+    asked: true
+    critical: true
+    text:
+      fa: "چه چیزی می‌خواهی بسازی، برای چه کسی، و قرار است چه کاری انجام دهد؟"
+      en: "What do you want to build, for whom, and what should it do?"
+      tr: "Ne yapmak istiyorsun, kimin için ve ne iş görmeli?"
+    example:
+      fa: "مثلاً: «ایجنتی که تیکت‌های پشتیبانی مشتری‌ها را می‌خواند، اولویتشان را تعیین می‌کند و پیش‌نویس جواب می‌دهد.»"
+      en: "e.g. \"An agent that reads customers' support tickets, sets their priority and drafts a reply.\""
+      tr: "ör. \"Müşterilerin destek taleplerini okuyan, önceliklerini belirleyen ve yanıt taslağı hazırlayan bir ajan.\""
+    why:
+      fa: "یک جمله کافی است؛ بقیه را با چند سؤال کوتاه کامل می‌کنیم."
+      en: "One sentence is enough; a few short questions fill in the rest."
+      tr: "Bir cümle yeterli; gerisini birkaç kısa soruyla tamamlarız."
+  - field: target_user
+    asked: true
+    critical: true
+    text:
+      fa: "چه کسی از آن استفاده می‌کند یا نتیجه‌اش را می‌بیند؟"
+      en: "Who will use it, or see what it produces?"
+      tr: "Onu kim kullanacak ya da ürettiğini kim görecek?"
+    example:
+      fa: "مثلاً: «تیم پشتیبانی سه‌نفره‌ی ما»"
+      en: "e.g. \"our three-person support team\""
+      tr: "ör. \"üç kişilik destek ekibimiz\""
+    why:
+      fa: "مخاطب سطح زبان، فرمت خروجی و معیار قبول را تعیین می‌کند."
+      en: "The audience sets the tone, the output format and what counts as good."
+      tr: "Hedef kitle dili, çıktı biçimini ve neyin iyi sayılacağını belirler."
+    suggestion:
+      fa: "خود من (مالک)"
+      en: "me, the owner"
+      tr: "ben, sahibi"
+  - field: problem
+    asked: true
+    critical: false
+    text:
+      fa: "امروز چه چیزی سخت، کند یا پرخطاست که این ایجنت باید درستش کند؟"
+      en: "What is hard, slow or error-prone today that it should fix?"
+      tr: "Bugün zor, yavaş ya da hataya açık olan ve düzeltmesi gereken şey ne?"
+    example:
+      fa: "مثلاً: «جواب دادن به هر تیکت ۲۰ دقیقه طول می‌کشد و تیکت‌های فوری گم می‌شوند.»"
+      en: "e.g. \"Each ticket takes 20 minutes to answer and urgent ones get lost.\""
+      tr: "ör. \"Her talebi yanıtlamak 20 dakika sürüyor ve acil olanlar kayboluyor.\""
+    why:
+      fa: "مسئله‌ی روشن یعنی معیار موفقیت قابل اندازه‌گیری."
+      en: "A clear problem gives a measurable success criterion."
+      tr: "Net bir sorun, ölçülebilir bir başarı ölçütü verir."
+  - field: input_examples
+    asked: true
+    critical: false
+    text:
+      fa: "یک نمونه‌ی واقعی از چیزی که به آن داده می‌شود بنویس."
+      en: "Paste one real example of what it will receive."
+      tr: "Alacağı şeyden gerçek bir örnek yapıştır."
+    example:
+      fa: "مثلاً متن یک تیکت واقعی (اطلاعات شخصی را حذف کن)."
+      en: "e.g. the text of one real ticket (remove personal details)."
+      tr: "ör. gerçek bir talebin metni (kişisel bilgileri çıkar)."
+    why:
+      fa: "نمونه‌ی واقعی بعداً یکی از موارد آزمون می‌شود."
+      en: "A real example later becomes one of its test cases."
+      tr: "Gerçek bir örnek daha sonra test durumlarından biri olur."
+  - field: expected_outputs
+    asked: true
+    critical: true
+    text:
+      fa: "برای همان نمونه، چه خروجی‌ای از آن انتظار داری؟"
+      en: "For that example, what should it produce?"
+      tr: "O örnek için ne üretmesini bekliyorsun?"
+    example:
+      fa: "مثلاً: «اولویت: فوری؛ دسته: پرداخت؛ پیش‌نویس جواب در سه جمله.»"
+      en: "e.g. \"Priority: urgent; category: billing; a three-sentence draft reply.\""
+      tr: "ör. \"Öncelik: acil; kategori: ödeme; üç cümlelik yanıt taslağı.\""
+    why:
+      fa: "قرارداد خروجی (فرمت و فیلدها) از همین جواب ساخته می‌شود."
+      en: "The output contract (format and fields) is built from this answer."
+      tr: "Çıktı sözleşmesi (biçim ve alanlar) bu yanıttan oluşturulur."
+    suggestion:
+      fa: "یک خلاصه‌ی کوتاه نوشتاری که من پیش از استفاده بازبینی می‌کنم"
+      en: "a short written summary that I review before using it"
+      tr: "kullanmadan önce gözden geçirdiğim kısa bir yazılı özet"
+  - field: acceptance_criteria
+    asked: true
+    critical: true
+    text:
+      fa: "از کجا می‌فهمی کارش خوب بوده؟ (یک معیار قابل سنجش)"
+      en: "How will you know it did well? (one measurable criterion)"
+      tr: "İyi iş çıkardığını nasıl anlayacaksın? (ölçülebilir bir ölçüt)"
+    example:
+      fa: "مثلاً: «در ۸ تیکت از ۱۰ تیکت نمونه، اولویت درست است و جواب بدون ویرایش قابل ارسال است.»"
+      en: "e.g. \"On 8 of 10 sample tickets the priority is right and the reply can be sent without edits.\""
+      tr: "ör. \"10 örnek talebin 8'inde öncelik doğru ve yanıt düzeltmeden gönderilebilir.\""
+    why:
+      fa: "ارزیابی پیش از فعال‌سازی دقیقاً همین معیار را می‌سنجد."
+      en: "The evaluation before activation measures exactly this."
+      tr: "Etkinleştirmeden önceki değerlendirme tam olarak bunu ölçer."
+    suggestion:
+      fa: "در دست‌کم ۸ نمونه از ۱۰ نمونه، خروجی را بدون ویرایش قبول می‌کنم"
+      en: "I accept the output without edits on at least 8 of 10 samples"
+      tr: "10 örneğin en az 8'inde çıktıyı düzeltmeden kabul ederim"
+  - field: constraints
+    asked: false
+    critical: false
+    default:
+      fa: "به اینترنت دسترسی ندارد، کد یا داده‌ای را تغییر نمی‌دهد و بدون تأیید من چیزی برای کسی نمی‌فرستد"
+      en: "no internet access, changes no code or data, and sends nothing to anyone without my approval"
+      tr: "internete erişmez, kod ya da veri değiştirmez ve onayım olmadan kimseye bir şey göndermez"
+  - field: allowed_sources
+    asked: false
+    critical: false
+    default:
+      fa: "فقط ورودی همان کار و سندهایی که خودم به آن می‌دهم"
+      en: "only the input of each task and the documents I give it"
+      tr: "yalnızca her görevin girdisi ve benim verdiğim belgeler"
+  - field: permissions
+    asked: false
+    critical: false
+    default:
+      fa: "شبکه: خیر؛ نوشتن در مخزن کد: خیر؛ دیپلوی: خیر"
+      en: "network: no; write to the code repository: no; deploy: no"
+      tr: "ağ: hayır; kod deposuna yazma: hayır; yayına alma: hayır"
+  - field: budget
+    asked: false
+    critical: false
+    default:
+      fa: "حداکثر ۱ دلار برای هر اجرا"
+      en: "at most $1 per run"
+      tr: "çalıştırma başına en fazla 1 $"
