@@ -1,6 +1,9 @@
 section: action_engine
 questions:
-  - id: action_engine.actions
-    text: "این Agent چه اقدام‌هایی انجام می‌دهد؟ (برای Persona: click/choose/abandon؛ برای Specialist: نام همان capabilityها)"
-    type: text
-    target: action_engine.actions
+- id: action_engine.actions
+  text:
+    fa: 'این Agent چه اقدام‌هایی انجام می‌دهد؟ (برای Persona: click/choose/abandon؛ برای Specialist: نام همان capabilityها)'
+    en: 'What actions does this agent take? (Persona: click/choose/abandon; Specialist: the names of its capabilities)'
+    tr: 'Bu ajan hangi eylemleri gerçekleştiriyor? (Persona için: click/choose/abandon; Uzman için: yeteneklerinin adları)'
+  type: text
+  target: action_engine.actions

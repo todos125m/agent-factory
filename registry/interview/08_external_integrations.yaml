@@ -1,6 +1,9 @@
 section: external_integrations
 questions:
-  - id: external_integrations.services
-    text: "این Agent به کدام سرویس بیرونی نیاز دارد؟ (مثل ایمیل، تلگرام، دیتابیس خارجی — می‌تواند خالی باشد)"
-    type: text
-    target: external_integrations.services
+- id: external_integrations.services
+  text:
+    fa: این Agent به کدام سرویس بیرونی نیاز دارد؟ (مثل ایمیل، تلگرام، دیتابیس خارجی — می‌تواند خالی باشد)
+    en: Which external services does this agent need? (e.g. email, Telegram, an external database — may be empty)
+    tr: Bu ajanın hangi dış servislere ihtiyacı var? (ör. e-posta, Telegram, harici bir veritabanı — boş olabilir)
+  type: text
+  target: external_integrations.services

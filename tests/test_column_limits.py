@@ -29,6 +29,7 @@ from app.gateway.providers import FakeProvider
 from app.gateway.service import Gateway, default_providers
 from app.main import app as api
 from app.manager import PlanStepIn
+from app.preferences import AUDIENCE_LEVELS, CODE_VISIBILITY, LOCALES
 from app.models import Agent, BudgetHold, Feedback, SettingsLayer, SettingsScope, Skill, Task
 from app.registry import MODEL_ROLES, RegistryError, parse_skill_file
 from app.routers.manager import get_gateway
@@ -117,6 +118,9 @@ CLOSED = {
     ("feedback", "rating"): lambda: {"up", "down"},  # FeedbackIn's pattern
     ("chat_messages", "role"): lambda: {"user", "manager"},
     ("chat_messages", "suggested_action"): lambda: {"none", "plan", "approve", "checkpoint:" + "9" * 12},
+    ("user_preferences", "ui_locale"): lambda: set(LOCALES),  # PreferencesUpdate's Literals
+    ("user_preferences", "audience_level"): lambda: set(AUDIENCE_LEVELS),
+    ("user_preferences", "code_visibility"): lambda: set(CODE_VISIBILITY),
 }
 
 CODE = {("run_events", "type")}  # the literal passed to record_event: test_every_event_type_fits_its_column
@@ -499,12 +503,14 @@ PLAIN_BODIES = {
     "ProjectPauseUpdate": "a boolean",
     "RatingIn": "an integer from 1 to 5",
     "BenchmarkRequest": "a list of RouteIn, which is a StorableIn",
+    "PreferencesUpdate": "closed sets of short values (Literal), each audited in CLOSED",
 }
 UNTYPED_BODIES = {  # (method, path) of a body taken as a plain dict: who validates it
     ("POST", "/agents"): "AgentSpec, a StorableIn",
     ("PUT", "/settings/{scope}/{scope_id}"): "SettingsLayerIn, a StorableIn",
     ("POST", "/blueprints/validate"): "nothing is stored",
     ("POST", "/interview/answer"): "nothing is stored",
+    ("POST", "/interview/state"): "nothing is stored",
 }
 
 

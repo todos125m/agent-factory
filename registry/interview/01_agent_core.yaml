@@ -1,38 +1,71 @@
 section: agent_core
 questions:
-  - id: agent_core.agent_type
-    text: "این Agent یک Persona Agent (شبیه‌ساز کاربر برای تست محصول) است یا یک Agent متخصص؟"
-    type: single_choice
-    target: agent_core.agent_type
-    options:
-      - value: specialist
-        label: "Specialist — کار مشخصی انجام می‌دهد (تحقیق، محتوا، کد، بازبینی و ...)"
-        recommended: true
-      - value: persona
-        label: "Persona Agent — نقش یک کاربر واقعی را بازی می‌کند"
-  - id: agent_core.name
-    text: "یک نام کوتاه انگلیسی برای Agent (فقط حروف کوچک/عدد/‑ یا _، مثل research یا content_writer)"
-    type: text
-    target: agent_core.name
-  - id: agent_core.description
-    text: "این Agent دقیقاً چه کاری انجام می‌دهد؟ (یک یا دو جمله)"
-    type: text
-    target: agent_core.description
-  - id: agent_core.model_role
-    text: "این Agent برای کدام نقش مدل ساخته می‌شود؟"
-    type: single_choice
-    target: agent_core.model_role
-    options:
-      - value: research
-        label: "research — جمع‌آوری و تحلیل اطلاعات"
-        recommended: true
-      - value: coding
-        label: "coding — نوشتن/بازبینی کد"
-      - value: manager
-        label: "manager — برنامه‌ریزی و تفویض کار"
-      - value: cheap
-        label: "cheap — کارهای ساده و ارزان"
-  - id: agent_core.capabilities
-    text: "این Agent چه توانایی‌هایی دارد؟ (لیست کوتاه، هرکدام یک کلمه/عبارت کوتاه)"
-    type: text
-    target: agent_core.capabilities
+- id: agent_core.agent_type
+  text:
+    fa: این Agent یک Persona Agent (شبیه‌ساز کاربر برای تست محصول) است یا یک Agent متخصص؟
+    en: Is this agent a Persona Agent (a simulated user for testing a product) or a Specialist?
+    tr: Bu ajan bir Persona Ajanı mı (ürünü test etmek için kullanıcıyı canlandıran) yoksa bir Uzman mı?
+  type: single_choice
+  target: agent_core.agent_type
+  options:
+  - value: specialist
+    label:
+      fa: Specialist — کار مشخصی انجام می‌دهد (تحقیق، محتوا، کد، بازبینی و ...)
+      en: Specialist — does a defined job (research, content, code, review …)
+      tr: Uzman — belirli bir işi yapar (araştırma, içerik, kod, inceleme …)
+    recommended: true
+  - value: persona
+    label:
+      fa: Persona Agent — نقش یک کاربر واقعی را بازی می‌کند
+      en: Persona Agent — plays the part of a real user
+      tr: Persona Ajanı — gerçek bir kullanıcıyı canlandırır
+- id: agent_core.name
+  text:
+    fa: یک نام کوتاه انگلیسی برای Agent (فقط حروف کوچک/عدد/‑ یا _، مثل research یا content_writer)
+    en: A short English name for the agent (lowercase letters, digits, - or _ only, e.g. research or content_writer)
+    tr: Ajan için kısa bir İngilizce ad (yalnızca küçük harf, rakam, - veya _; ör. research ya da content_writer)
+  type: text
+  target: agent_core.name
+- id: agent_core.description
+  text:
+    fa: این Agent دقیقاً چه کاری انجام می‌دهد؟ (یک یا دو جمله)
+    en: What exactly does this agent do? (one or two sentences)
+    tr: Bu ajan tam olarak ne yapıyor? (bir iki cümle)
+  type: text
+  target: agent_core.description
+- id: agent_core.model_role
+  text:
+    fa: این Agent برای کدام نقش مدل ساخته می‌شود؟
+    en: Which model role is this agent built for?
+    tr: Bu ajan hangi model rolü için oluşturuluyor?
+  type: single_choice
+  target: agent_core.model_role
+  options:
+  - value: research
+    label:
+      fa: research — جمع‌آوری و تحلیل اطلاعات
+      en: research — gather and analyse information
+      tr: research — bilgi toplama ve analiz
+    recommended: true
+  - value: coding
+    label:
+      fa: coding — نوشتن/بازبینی کد
+      en: coding — write / review code
+      tr: coding — kod yazma / inceleme
+  - value: manager
+    label:
+      fa: manager — برنامه‌ریزی و تفویض کار
+      en: manager — plan and delegate work
+      tr: manager — planlama ve iş dağıtma
+  - value: cheap
+    label:
+      fa: cheap — کارهای ساده و ارزان
+      en: cheap — simple, low-cost work
+      tr: cheap — basit ve ucuz işler
+- id: agent_core.capabilities
+  text:
+    fa: این Agent چه توانایی‌هایی دارد؟ (لیست کوتاه، هرکدام یک کلمه/عبارت کوتاه)
+    en: What can this agent do? (a short list, a word or short phrase each)
+    tr: Bu ajan neler yapabiliyor? (kısa bir liste, her biri bir kelime ya da kısa ifade)
+  type: text
+  target: agent_core.capabilities

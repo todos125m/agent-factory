@@ -15,6 +15,13 @@ from app.models import Mode, Project, SettingsLayer, SettingsScope, Task
 
 DEFAULTS: dict[str, Any] = {
     "mode": "manual_learning",  # automatic | manual_learning
+    # interaction_policy has no default of its own: unless a layer sets it, it follows the mode (MODE_POLICY), so
+    # the existing projects keep exactly the autonomy they had. resolve() always returns it.
+    # The loosest interaction_policy allowed at this scope and every scope below it: a lower layer can only
+    # tighten it (resolve() takes the strictest), so a project or task can't undo an owner-wide limit.
+    "max_interaction_policy": "delegated_bounded",
+    "quality_target": "prototype",  # prototype | production_candidate: depth of evaluation, never authority
+    "output_locale": "auto",  # auto (the owner's UI language) | fa | en | tr: the language of model replies
     "depth": "standard",  # quick | standard | deep
     "max_steps": 6,
     "approvals": {"low": "auto", "medium": "manager", "high": "user"},
@@ -36,6 +43,31 @@ DEFAULTS: dict[str, Any] = {
         "cheap": {"provider": "anthropic", "model": "claude-haiku-4-5", "effort": None},
     },
 }
+
+# How much the system may do between two approvals (docs/HUMAN_GUIDED_FACTORY.md §4), strictest first. Every one is
+# interactive: step_by_step asks at each step, milestone at the main points, delegated_bounded acts only inside an
+# approved scope and stops on ambiguity or a change of scope. It never adds a permission, tool, budget or retry.
+INTERACTION_POLICIES = ("step_by_step", "milestone", "delegated_bounded")
+# A new agent is built step by step unless the owner chooses otherwise (the factory's own default).
+FACTORY_DEFAULT_POLICY = "step_by_step"
+# The legacy modes, mapped without granting anything they didn't allow. manual_learning waits for the owner at every
+# checkpoint: step_by_step, and no layer can loosen it (MODE_CEILING) — loosening means choosing another mode, openly.
+# automatic lets the manager decide the checkpoints its approval rules allow once the owner approved the plan, the
+# main point: milestone by default. The mode keeps its own meaning (learning traces in manual_learning); the policy
+# only ever narrows what the mode allows (app/manager.py::create_checkpoint).
+MODE_POLICY = {"manual_learning": "step_by_step", "automatic": "milestone"}
+MODE_CEILING = {"manual_learning": "step_by_step", "automatic": "delegated_bounded"}
+QUALITY_TARGETS = ("prototype", "production_candidate")
+OUTPUT_LOCALES = ("auto", "fa", "en", "tr")
+# Keys a layer may set that DEFAULTS doesn't hold, because resolve() derives their default.
+DERIVED_KEYS = frozenset({"interaction_policy"})
+
+
+def strictest(*policies: Any) -> str:
+    """The most restrictive of `policies`; anything that isn't a known policy counts as step_by_step (fail closed)."""
+    rank = {p: i for i, p in enumerate(INTERACTION_POLICIES)}
+    return INTERACTION_POLICIES[min(rank.get(p, 0) if isinstance(p, str) else 0 for p in policies)]
+
 
 MODEL_ACCESS_PROVIDERS: dict[str, str] = {
     "api_key": "anthropic",
@@ -82,6 +114,11 @@ def resolve(
     ← task layer. An entity's own fields are the base of its scope; an explicit settings layer at that
     same scope still overrides them. Every project has a mode (chosen at creation), so a global or
     workspace "mode" only applies where no project is in scope.
+
+    Two keys are not a plain override. `max_interaction_policy` is the strictest any layer set, or the mode allows
+    (MODE_CEILING): a lower layer can tighten it, never loosen it. `interaction_policy` is the lowest layer's, or the
+    mode's (MODE_POLICY) when no layer set one, then clamped to that ceiling: the result is what the system may
+    actually do.
     """
     task = session.get(Task, task_id) if task_id is not None else None
     if task is not None and project_id is None:
@@ -99,6 +136,7 @@ def resolve(
     result = copy.deepcopy(DEFAULTS)
     explicit_role_provider: set[str] = set()
     explicit_role_model: set[str] = set()
+    ceilings = [DEFAULTS["max_interaction_policy"]]
     for scope, scope_id in chain:
         if scope_id is None:
             continue
@@ -118,7 +156,15 @@ def resolve(
                         explicit_role_provider.add(role)
                     if isinstance(cfg, dict) and "model" in cfg:
                         explicit_role_model.add(role)
+            if "max_interaction_policy" in layer.values:
+                ceilings.append(layer.values["max_interaction_policy"])
             result = deep_merge(result, layer.values)
+
+    mode = result.get("mode")
+    mode = mode if isinstance(mode, str) else None  # a stored non-string (written around PUT's validation) fails closed
+    result["max_interaction_policy"] = strictest(*ceilings, MODE_CEILING.get(mode, "step_by_step"))
+    requested = result.get("interaction_policy") or MODE_POLICY.get(mode, "step_by_step")
+    result["interaction_policy"] = strictest(requested, result["max_interaction_policy"])
 
     provider = MODEL_ACCESS_PROVIDERS.get(result.get("model_access"))
     default_model = MODEL_ACCESS_DEFAULT_MODEL.get(result.get("model_access"))

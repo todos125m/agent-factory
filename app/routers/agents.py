@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.errors import AppError, not_found
 from app.models import Agent, Feedback, Skill
 from app.registry import AgentSpec, RegistryError, find_by_capability, upsert_agent
 from app.schemas import AgentOut, FeedbackOut, SkillOut, SkillSummary
@@ -22,7 +23,7 @@ def list_agents(capability: str | None = None, session: Session = Depends(get_se
 def get_agent(name: str, session: Session = Depends(get_session)):
     agent = session.scalar(select(Agent).where(Agent.name == name))
     if not agent:
-        raise HTTPException(404, "Agent not found")
+        raise not_found("agent")
     return agent
 
 
@@ -34,7 +35,7 @@ def register_agent(body: dict, session: Session = Depends(get_session)):
             raise RegistryError(f"agent '{spec.name}' already exists")
         agent = upsert_agent(session, spec)
     except (ValidationError, RegistryError) as e:
-        raise HTTPException(422, str(e)) from e
+        raise AppError(422, "agent_invalid", str(e)) from e
     session.commit()
     return agent
 
@@ -53,5 +54,5 @@ def list_skills(session: Session = Depends(get_session)):
 def get_skill(name: str, session: Session = Depends(get_session)):
     skill = session.scalar(select(Skill).where(Skill.name == name))
     if not skill:
-        raise HTTPException(404, "Skill not found")
+        raise not_found("skill")
     return skill

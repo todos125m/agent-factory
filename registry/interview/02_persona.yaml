@@ -1,32 +1,57 @@
 section: persona
 depends_on:
-  agent_core.agent_type: [persona]
+  agent_core.agent_type:
+  - persona
 questions:
-  - id: persona.name
-    text: "اسم/عنوان کوتاه این پرسونا چیست؟ (مثل first_time_freelancer)"
-    type: text
-    target: persona.name
-  - id: persona.knows
-    text: "این پرسونا از قبل چه چیزهایی می‌داند؟ (لیست کوتاه)"
-    type: text
-    target: persona.knows
-  - id: persona.does_not_understand
-    text: "این پرسونا چه چیزهایی را نمی‌فهمد/بلد نیست؟ (لیست کوتاه — Persona نباید همه‌چیزدان باشد)"
-    type: text
-    target: persona.does_not_understand
-  - id: persona.patience
-    text: "میزان صبر این پرسونا در استفاده از محصول چقدر است؟"
-    type: single_choice
-    target: persona.patience
-    options:
-      - value: low
-        label: "کم — زود رها می‌کند"
-        recommended: true
-      - value: medium
-        label: "متوسط"
-      - value: high
-        label: "زیاد — تلاش می‌کند"
-  - id: persona.goals
-    text: "این پرسونا با استفاده از محصول دنبال چه هدفی است؟ (لیست کوتاه)"
-    type: text
-    target: persona.goals
+- id: persona.name
+  text:
+    fa: اسم/عنوان کوتاه این پرسونا چیست؟ (مثل first_time_freelancer)
+    en: A short name or title for this persona (e.g. first_time_freelancer)
+    tr: Bu personanın kısa adı ya da unvanı nedir? (ör. first_time_freelancer)
+  type: text
+  target: persona.name
+- id: persona.knows
+  text:
+    fa: این پرسونا از قبل چه چیزهایی می‌داند؟ (لیست کوتاه)
+    en: What does this persona already know? (a short list)
+    tr: Bu persona neleri zaten biliyor? (kısa bir liste)
+  type: text
+  target: persona.knows
+- id: persona.does_not_understand
+  text:
+    fa: این پرسونا چه چیزهایی را نمی‌فهمد/بلد نیست؟ (لیست کوتاه — Persona نباید همه‌چیزدان باشد)
+    en: What does this persona not understand or know how to do? (a short list — a persona must not know everything)
+    tr: Bu persona neleri anlamıyor ya da bilmiyor? (kısa bir liste — persona her şeyi bilmemeli)
+  type: text
+  target: persona.does_not_understand
+- id: persona.patience
+  text:
+    fa: میزان صبر این پرسونا در استفاده از محصول چقدر است؟
+    en: How patient is this persona when using the product?
+    tr: Bu persona ürünü kullanırken ne kadar sabırlı?
+  type: single_choice
+  target: persona.patience
+  options:
+  - value: low
+    label:
+      fa: کم — زود رها می‌کند
+      en: Low — gives up quickly
+      tr: Düşük — çabuk vazgeçer
+    recommended: true
+  - value: medium
+    label:
+      fa: متوسط
+      en: Medium
+      tr: Orta
+  - value: high
+    label:
+      fa: زیاد — تلاش می‌کند
+      en: High — keeps trying
+      tr: Yüksek — denemeye devam eder
+- id: persona.goals
+  text:
+    fa: این پرسونا با استفاده از محصول دنبال چه هدفی است؟ (لیست کوتاه)
+    en: What is this persona trying to achieve with the product? (a short list)
+    tr: Bu persona ürünle neyi başarmak istiyor? (kısa bir liste)
+  type: text
+  target: persona.goals

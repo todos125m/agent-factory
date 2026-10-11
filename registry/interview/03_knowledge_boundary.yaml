@@ -1,26 +1,48 @@
 section: knowledge_boundary
 questions:
-  - id: knowledge_boundary.allowed_sources
-    text: "این Agent مجاز است از کدام منابع استفاده کند؟ (چند مورد را انتخاب کن)"
-    type: multi_choice
-    target: knowledge_boundary.allowed_sources
-    options:
-      - value: task.input
-        label: "ورودی همان Task"
-        recommended: true
-      - value: memory.phase_current
-        label: "حافظه‌ی همین فاز/پروژه"
-        recommended: true
-      - value: skills
-        label: "Skillهای اختصاص‌داده‌شده"
-        recommended: true
-      - value: persona.knows
-        label: "دانش پرسونا (فقط برای Persona Agent)"
-        depends_on:
-          agent_core.agent_type: [persona]
-  - id: knowledge_boundary.general_llm_knowledge
-    text: "آیا اجازه دارد از دانش عمومی مدل (خارج از پروژه) هم استفاده کند؟"
-    type: confirm
-    target: knowledge_boundary.general_llm_knowledge
-    recommended: false
-    note: "طبق تصمیم صاحب پروژه همیشه باید false باشد؛ این سوال فقط برای تأیید آگاهانه است."
+- id: knowledge_boundary.allowed_sources
+  text:
+    fa: این Agent مجاز است از کدام منابع استفاده کند؟ (چند مورد را انتخاب کن)
+    en: Which sources may this agent use? (pick one or more)
+    tr: Bu ajan hangi kaynakları kullanabilir? (bir veya birkaçını seç)
+  type: multi_choice
+  target: knowledge_boundary.allowed_sources
+  options:
+  - value: task.input
+    label:
+      fa: ورودی همان Task
+      en: The task's own input
+      tr: Görevin kendi girdisi
+    recommended: true
+  - value: memory.phase_current
+    label:
+      fa: حافظه‌ی همین فاز/پروژه
+      en: This phase's / project's memory
+      tr: Bu aşamanın / projenin belleği
+    recommended: true
+  - value: skills
+    label:
+      fa: Skillهای اختصاص‌داده‌شده
+      en: The skills assigned to it
+      tr: Kendisine atanan beceriler
+    recommended: true
+  - value: persona.knows
+    label:
+      fa: دانش پرسونا (فقط برای Persona Agent)
+      en: The persona's knowledge (Persona Agent only)
+      tr: Personanın bilgisi (yalnızca Persona Ajanı)
+    depends_on:
+      agent_core.agent_type:
+      - persona
+- id: knowledge_boundary.general_llm_knowledge
+  text:
+    fa: آیا اجازه دارد از دانش عمومی مدل (خارج از پروژه) هم استفاده کند؟
+    en: May it also use the model's general knowledge (outside the project)?
+    tr: Modelin genel bilgisini de (projenin dışında) kullanabilir mi?
+  type: confirm
+  target: knowledge_boundary.general_llm_knowledge
+  recommended: false
+  note:
+    fa: طبق تصمیم صاحب پروژه همیشه باید false باشد؛ این سوال فقط برای تأیید آگاهانه است.
+    en: By the owner's decision this is always false; the question only makes it a conscious confirmation.
+    tr: Proje sahibinin kararıyla bu her zaman false'tur; soru yalnızca bilinçli bir onay içindir.

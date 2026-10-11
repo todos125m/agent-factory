@@ -1,7 +1,13 @@
 section: memory
 questions:
-  - id: memory.long_term_sources
-    text: "این Agent به چه حافظه‌ی بلندمدتی نیاز دارد؟ (لیست کوتاه؛ می‌تواند خالی باشد)"
-    type: text
-    target: memory.long_term_sources
-    note: "حافظه‌ی کوتاه‌مدت (پنجره‌ی همین اجرا) همیشه فعال است — چیزی نمی‌پرسیم."
+- id: memory.long_term_sources
+  text:
+    fa: این Agent به چه حافظه‌ی بلندمدتی نیاز دارد؟ (لیست کوتاه؛ می‌تواند خالی باشد)
+    en: What long-term memory does this agent need? (a short list; may be empty)
+    tr: Bu ajanın hangi uzun süreli belleğe ihtiyacı var? (kısa bir liste; boş olabilir)
+  type: text
+  target: memory.long_term_sources
+  note:
+    fa: حافظه‌ی کوتاه‌مدت (پنجره‌ی همین اجرا) همیشه فعال است — چیزی نمی‌پرسیم.
+    en: Short-term memory (this run's window) is always on — we don't ask about it.
+    tr: Kısa süreli bellek (bu çalıştırmanın penceresi) her zaman açıktır — bunu sormuyoruz.

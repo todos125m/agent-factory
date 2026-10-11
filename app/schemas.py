@@ -9,8 +9,9 @@ from app.models import (
     Feedback, MemoryCategory, MemoryItem, ModelCall, Mode, Project, ProjectStage, RiskLevel, SettingsScope, Task,
     TaskStatus, User, Workspace,
 )
+from app.preferences import AUDIENCE_LEVELS, CODE_VISIBILITY, LOCALES
 from app.registry import MODEL_ROLES
-from app.settings_layers import MODEL_ACCESS_PROVIDERS
+from app.settings_layers import INTERACTION_POLICIES, MODEL_ACCESS_PROVIDERS, OUTPUT_LOCALES, QUALITY_TARGETS
 from app.storable import INT32_MAX, Int32, StorableIn, limit
 
 # A USD limit for the budget gate, which blocks a call once `spent + in flight + estimate > limit`
@@ -37,6 +38,46 @@ class UserOut(ORM):
     email: str
     name: str | None
     created_at: datetime
+
+
+Locale = Literal[LOCALES]
+AudienceLevel = Literal[AUDIENCE_LEVELS]
+CodeVisibility = Literal[CODE_VISIBILITY]
+
+
+class PreferencesUpdate(BaseModel):
+    """PATCH: a key that is sent is set, a key left out is kept. code_visibility may be null — "follow the level";
+    the language and the level, once chosen, are changed, not unchosen. Choosing a language changes no answer,
+    approval or stage anywhere: they are stored apart from how they are shown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ui_locale: Locale | None = None
+    audience_level: AudienceLevel | None = None
+    code_visibility: CodeVisibility | None = None
+
+    @field_validator("ui_locale", "audience_level", mode="before")
+    @classmethod
+    def _chosen_is_not_unchosen(cls, value: Any) -> Any:
+        if value is None:
+            raise PydanticCustomError("null_preference", "null is not a value; leave the key out to keep it")
+        return value
+
+
+class EffectivePreferences(BaseModel):
+    ui_locale: Locale
+    dir: Literal["rtl", "ltr"]
+    audience_level: AudienceLevel
+    code_visibility: CodeVisibility
+
+
+class PreferencesOut(BaseModel):
+    user_id: int
+    ui_locale: Locale | None  # None: not chosen yet (the UI asks on first entry)
+    audience_level: AudienceLevel | None  # None: not chosen yet (the effective one is only a proposal)
+    code_visibility: CodeVisibility | None  # None: follows the level
+    effective: EffectivePreferences
+    updated_at: datetime | None
 
 
 class ProjectCreate(StorableIn):
@@ -145,6 +186,9 @@ ApprovalRule = Literal["auto", "manager", "user"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
 ModelAccess = Literal[tuple(MODEL_ACCESS_PROVIDERS)]
 ModelRole = Literal[tuple(sorted(MODEL_ROLES))]
+InteractionPolicy = Literal[INTERACTION_POLICIES]
+QualityTarget = Literal[QUALITY_TARGETS]
+OutputLocale = Literal[OUTPUT_LOCALES]
 
 
 def _no_whitespace(value: str) -> str:
@@ -214,6 +258,11 @@ class SettingsLayerIn(_LayerPart):
     """The values PUT /settings/{scope}/{scope_id} accepts; stored exactly as sent once they pass."""
 
     mode: Mode | None = None
+    # What the system may do between approvals; resolve() clamps it to max_interaction_policy and the mode's ceiling.
+    interaction_policy: InteractionPolicy | None = None
+    max_interaction_policy: InteractionPolicy | None = None
+    quality_target: QualityTarget | None = None
+    output_locale: OutputLocale | None = None
     depth: Depth | None = None
     # A plan is approved as a whole (§8) and each step becomes a paid task: a sanity ceiling well
     # above the default, not a recommendation.

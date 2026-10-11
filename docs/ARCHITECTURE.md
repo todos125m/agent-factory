@@ -1,7 +1,23 @@
 # AI Venture Team — معماری کامل V1 تا V3
-## نسخه اصلاح‌شده: Dual Mode — Automatic + Manual/Learning
+## نسخه اصلاح‌شده: Dual Mode — Automatic + Manual/Learning (هر دو تعاملی — اصلاحیه‌ی ۱۱ اکتبر ۲۰۲۶)
 
 > هدف این سند: تعریف یک معماری عملی، قابل‌گسترش و قابل‌کنترل برای ساخت یک «تیم استارتاپی هوش مصنوعی» که بتواند مسئله را بفهمد، تخصص مناسب را انتخاب کند، کار را اجرا کند، نتیجه را ارزیابی کند و در حالت Manual/Learning هم مسیر حل مسئله را به کاربر آموزش دهد.
+
+> **اصلاحیه‌ی ۱۱ اکتبر ۲۰۲۶ — کارخانه‌ی ایجنت با هدایت کاربر (Issue #2).** هر جا این سند از «خودکار»، «حداقل دخالت
+> کاربر»، «autonomous» یا ساخت Specialist بدون کاربر حرف می‌زند، این قواعد مقدم‌اند (جزئیات و قراردادها:
+> `docs/HUMAN_GUIDED_FACTORY.md`؛ UI: `docs/FACTORY_UI_SPEC.md`؛ برنامه و gapها: `docs/FACTORY_IMPLEMENTATION_PLAN.md`):
+>
+> 1. **همه‌ی حالت‌ها تعاملی‌اند**؛ فرق‌شان فقط تعداد نقاط تأیید است — `interaction_policy`: `step_by_step` (تأیید هر مرحله؛
+>    پیش‌فرض ساخت ایجنت) / `milestone` (نقاط اصلی) / `delegated_bounded` (فقط داخل دامنه‌ی تأییدشده؛ توقف در ابهام یا
+>    تغییر دامنه).
+> 2. نام‌های قدیمی حفظ‌اند: `manual_learning` = `step_by_step` (هیچ لایه‌ای شلش نمی‌کند)؛ `automatic` = `milestone`
+>    (مالک برنامه را تأیید می‌کند و مدیر فقط checkpointهایی را تصمیم می‌گیرد که قاعده‌ی ریسک اجازه دهد).
+> 3. **سکوت تأیید نیست**؛ لایه‌ی پایین‌تر سقف سیاست لایه‌ی بالاتر را باز نمی‌کند (`max_interaction_policy`).
+> 4. هیچ Specialist یا ایجنت جدیدی بدون تأیید brief، طرح و فعال‌سازی توسط مالک ساخته یا فعال نمی‌شود؛ متخصص ناموجود
+>    کار وابسته را BLOCKED نگه می‌دارد، وابستگی حذف نمی‌شود.
+> 5. زبان رابط، سطح توضیح و نمایش کد هیچ مجوز، بودجه یا اختیاری اضافه نمی‌کنند.
+>
+> استاندارد ۱۴بخشی (`docs/AGENT_BLUEPRINT.md`) و شش Engine (`docs/AGENT_PRINCIPLES.md`) بدون تغییر معتبرند.
 
 ---
 
@@ -10,7 +26,7 @@
 سیستم دو حالت اصلی دارد:
 
 ### Automatic Mode
-سیستم با حداقل دخالت کاربر، workflow را اجرا می‌کند. فقط در نقاطی که طبق policy نیاز به تأیید انسان است، متوقف می‌شود.
+سیستم workflow را اجرا می‌کند و در نقاط اصلی (تأیید برنامه، طرح و فعال‌سازی) و هر جا policy بخواهد، منتظر تأیید کاربر می‌ماند (`interaction_policy = milestone`). «خودکار» یعنی تأیید کمتر، نه بدون کاربر.
 
 ### Manual / Learning Mode
 سیستم علاوه بر انجام کار، در checkpointهای مهم توضیح می‌دهد:
@@ -34,6 +50,7 @@
 > Tasks are asynchronous.  
 > Decisions are auditable.  
 > Specialists are discoverable.  
+> Every mode is interactive.  
 > Expensive work is approval-gated.  
 > Learning is explicit in Manual Mode.
 
@@ -96,9 +113,10 @@ USER
 
 Manager فقط در checkpointهای لازم توضیح مختصر می‌دهد.
 
-کارهای کم‌ریسک می‌توانند خودکار باشند.
+کارهای کم‌ریسک *داخل برنامه‌ی تأییدشده* می‌توانند بدون توقف جداگانه انجام شوند — فقط اگر سیاست تعامل
+`step_by_step` نباشد.
 
-کارهای پرریسک، پرهزینه یا غیرقابل‌بازگشت می‌توانند approval بخواهند.
+کارهای پرریسک، پرهزینه یا غیرقابل‌بازگشت **همیشه** تأیید مالک را می‌خواهند.
 
 ---
 
@@ -311,6 +329,10 @@ Mode Engine نباید permissionهای امنیتی را دور بزند.
 
 یعنی Manual Mode به معنی دسترسی بیشتر نیست؛ فقط به معنی visibility و interaction بیشتر است.
 
+نگاشت به سیاست تعامل (`app/settings_layers.py`): `manual_learning` → `step_by_step` با سقف `step_by_step`؛
+`automatic` → `milestone` با سقف `delegated_bounded`. هر لایه‌ی تنظیمات می‌تواند سیاست را تنگ‌تر کند
+(`max_interaction_policy`) و هیچ لایه‌ای نمی‌تواند سقف لایه‌ی بالاتر را باز کند.
+
 ---
 
 # 7. Manager Agent
@@ -361,7 +383,8 @@ learning_checkpoints
 
 # 8. Approval Gate
 
-Approval Gate برای عملیات حساس است.
+Approval Gate برای عملیات حساس است. «NO → Execute» فقط *داخل برنامه‌ای که مالک تأیید کرده* و وقتی سیاست تعامل
+اجازه دهد معتبر است؛ با `step_by_step` هر گام از «Ask User» رد می‌شود.
 
 ```text
 Manager
@@ -409,6 +432,9 @@ User Approval
 ```
 
 Risk level باید بر اساس policy و نوع action تعیین شود، نه بر اساس حدس Agent.
+
+«Manager Review» فقط وقتی جای تأیید کاربر را می‌گیرد که mode = `automatic` و سیاست تعامل ≠ `step_by_step` باشد
+(`app/manager.py::create_checkpoint`)؛ در غیر این صورت تصمیم به صندوق تصمیم‌های مالک می‌رود.
 
 ---
 
@@ -479,6 +505,9 @@ Capability Match
        └── No suitable Agent → Specialist Request
 ```
 
+Specialist Request یک **پیشنهاد به مالک** است، نه دستور ساخت: کار وابسته تا تصمیم مالک BLOCKED می‌ماند و وابستگی‌اش
+در DAG حفظ می‌شود.
+
 قبل از ساخت Agent جدید:
 
 1. duplicate detection
@@ -533,6 +562,10 @@ Manager
 ```
 
 Agent جدید نباید مستقیماً بدون تست فعال شود.
+
+هر گام این pipeline تعاملی است: brief و Specification با مالک تأیید می‌شوند، Sandbox فقط با مجوزهای تأییدشده اجرا
+می‌شود و فعال‌سازی بعد از Evaluation PASS **و** تأیید نهایی مالک، با نسخه‌ی قبلی محفوظ برای rollback
+(`docs/HUMAN_GUIDED_FACTORY.md` §۵).
 
 ---
 
@@ -593,6 +626,7 @@ Agent جدید فقط زمانی ایجاد شود که:
 4. evaluation موفق شود.
 5. budget اجازه دهد.
 6. policy اجازه دهد.
+7. مالک brief، طرح و فعال‌سازی آن را تأیید کرده باشد.
 
 ---
 
@@ -1255,7 +1289,7 @@ learning_usefulness
 
 # 36. Human-in-the-loop
 
-سیستم autonomous است، اما تصمیم‌های مهم تحت کنترل کاربر باقی می‌مانند.
+سیستم در هر حالت تعاملی است: کار را جلو می‌برد، اما مراحل و تصمیم‌های مهم با تأیید کاربر پیش می‌روند (اصلاحیه‌ی ۱۱ اکتبر ۲۰۲۶).
 
 ```text
 LOW RISK
@@ -1286,8 +1320,8 @@ What are you trying to build?
 
 Mode:
 
-○ Automatic
-  Let AI handle the workflow.
+○ Automatic (milestones)
+  AI runs the steps; you approve the plan and the main points.
 
 ○ Manual / Learning
   Work with AI and learn the reasoning process.
@@ -1476,7 +1510,7 @@ USER
 
 # 42. V2 — Self-expanding Team
 
-بعد از پایدار شدن V1:
+بعد از پایدار شدن V1 (هر گام «NO → Agent Factory» یک پیشنهاد به مالک است و با تأیید او جلو می‌رود):
 
 ```text
 Manager
@@ -1546,7 +1580,7 @@ Manager
 Iteration
 ```
 
-Idea Hunter می‌تواند scheduled یا on-demand باشد.
+Idea Hunter می‌تواند scheduled یا on-demand باشد؛ خروجی آن پیشنهاد است و هیچ حلقه‌ای بدون تأیید مالک از یک مرحله به مرحله‌ی بعد (به‌خصوص Builder و Launch) نمی‌رود.
 
 ---
 
@@ -1945,7 +1979,7 @@ GitHub
 - microserviceهای زیاد
 - vector database پیچیده
 - multi-agent swarm
-- autonomy کامل
+- autonomy کامل (در هیچ نسخه‌ای — اصلاحیه‌ی ۱۱ اکتبر ۲۰۲۶)
 - Agent-to-Agent آزاد
 - Agent Factory بدون evaluation
 - دسترسی مستقیم Agentها به تمام ابزارها
@@ -2018,10 +2052,12 @@ Decisions are auditable.
 Evidence is explicit.
 Specialists are discoverable.
 New specialists are evaluated.
+Every mode is interactive.
 Expensive work is approval-gated.
 Risky actions are human-controlled.
-Automatic Mode optimizes execution.
+Automatic Mode optimizes execution between approvals.
 Manual Mode optimizes execution + learning.
+Seeing more never means being allowed more.
 ```
 
 ---
@@ -2066,7 +2102,7 @@ Iterate
 
 در Automatic Mode:
 
-> «تو هدف را بده؛ سیستم workflow را اجرا می‌کند.»
+> «تو هدف را بده و نقاط اصلی را تأیید کن؛ سیستم workflow را بین آن‌ها اجرا می‌کند.»
 
 در Manual / Learning Mode:
 
@@ -2074,7 +2110,7 @@ Iterate
 
 و در نسخه‌های بعدی:
 
-> «اگر تخصص لازم وجود نداشت، سیستم بتواند Specialist مناسب را تعریف، تست، ارزیابی و ثبت کند.»
+> «اگر تخصص لازم وجود نداشت، سیستم بتواند Specialist مناسب را **با مالک** تعریف، تست، ارزیابی و پس از تأیید او ثبت کند.»
 
 ---
 

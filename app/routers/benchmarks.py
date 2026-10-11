@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import benchmark
 from app.db import get_session
+from app.errors import not_found
 from app.gateway.service import Gateway
 from app.models import BenchmarkRun
 from app.routers.manager import get_gateway
@@ -37,5 +38,5 @@ def list_benchmark_runs(session: Session = Depends(get_session)):
 def rate_benchmark_run(run_id: int, body: RatingIn, session: Session = Depends(get_session)):
     run = session.get(BenchmarkRun, run_id)
     if run is None:
-        raise HTTPException(404, "Benchmark run not found")
+        raise not_found("benchmark_run", "Benchmark run not found")
     return benchmark.rate(session, run, body.rating)

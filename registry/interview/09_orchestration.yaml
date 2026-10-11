@@ -1,15 +1,30 @@
 section: orchestration
 questions:
-  - id: orchestration.approval_gate
-    text: "خروجی این Agent چه زمانی باید پیش شما بیاید برای تأیید؟"
-    type: single_choice
-    target: orchestration.approval_gate
-    options:
-      - value: checkpoint
-        label: "checkpoint — فقط تصمیم‌های پرریسک"
-        recommended: true
-      - value: always
-        label: "always — هر خروجی، قبل از ادامه"
-      - value: auto
-        label: "auto — بدون توقف (فقط برای کارهای کم‌ریسک)"
-    note: "via_orchestrator همیشه true است — Agentها هرگز مستقیم به هم زنگ نمی‌زنند (§53)."
+- id: orchestration.approval_gate
+  text:
+    fa: خروجی این Agent چه زمانی باید پیش شما بیاید برای تأیید؟
+    en: When should this agent's output come to you for approval?
+    tr: Bu ajanın çıktısı onay için ne zaman size gelmeli?
+  type: single_choice
+  target: orchestration.approval_gate
+  options:
+  - value: checkpoint
+    label:
+      fa: checkpoint — فقط تصمیم‌های پرریسک
+      en: checkpoint — high-risk decisions only
+      tr: checkpoint — yalnızca yüksek riskli kararlar
+    recommended: true
+  - value: always
+    label:
+      fa: always — هر خروجی، قبل از ادامه
+      en: always — every output, before going on
+      tr: always — her çıktı, devam etmeden önce
+  - value: auto
+    label:
+      fa: auto — بدون توقف (فقط برای کارهای کم‌ریسک)
+      en: auto — no stop (low-risk work only)
+      tr: auto — durmadan (yalnızca düşük riskli işler)
+  note:
+    fa: via_orchestrator همیشه true است — Agentها هرگز مستقیم به هم زنگ نمی‌زنند (§53).
+    en: via_orchestrator is always true — agents never call each other directly (§53).
+    tr: via_orchestrator her zaman true'dur — ajanlar birbirini asla doğrudan çağırmaz (§53).

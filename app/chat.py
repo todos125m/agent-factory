@@ -16,7 +16,7 @@ from pydantic import ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import context, storable
+from app import context, preferences, settings_layers, storable
 from app.gateway.service import Gateway
 from app.manager import ManagerError, ensure_active, manager_agent
 from app.models import ChatMessage, Project, Task, utcnow
@@ -49,7 +49,11 @@ def _chat_user_content(session: Session, project: Project, new: ChatMessage) -> 
         .limit(HISTORY_LIMIT - 1)  # the owner's new message, not stored yet, is the last of the 8
     ).all()
     history_lines = "\n".join(f"{m.role}: {m.text}" for m in [*reversed(stored), new])
-    return f"Project goal: {project.goal}\nTasks:\n{task_lines}\nRecent chat:\n{history_lines}"
+    content = f"Project goal: {project.goal}\nTasks:\n{task_lines}\nRecent chat:\n{history_lines}"
+    output_locale = settings_layers.resolve(session, project_id=project.id)["output_locale"]
+    if language := preferences.reply_language_line(session, project, output_locale):
+        content += f"\n{language}"
+    return content
 
 
 def send_message(session: Session, gateway: Gateway, project: Project, text: str) -> dict[str, Any]:

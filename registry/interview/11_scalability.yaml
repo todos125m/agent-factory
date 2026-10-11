@@ -1,7 +1,13 @@
 section: scalability
 questions:
-  - id: scalability.evaluation
-    text: "موفقیت این Agent چطور سنجیده می‌شود؟ (حداقل یک معیار قابل‌سنجش، مثل «۹۰٪ کارها بدون escalation»)"
-    type: text
-    target: scalability.evaluation
-    note: "deployment همیشه docker_compose است (بدون Kubernetes، §53)."
+- id: scalability.evaluation
+  text:
+    fa: موفقیت این Agent چطور سنجیده می‌شود؟ (حداقل یک معیار قابل‌سنجش، مثل «۹۰٪ کارها بدون escalation»)
+    en: How is this agent's success measured? (at least one measurable criterion, e.g. "90% of tasks without escalation")
+    tr: Bu ajanın başarısı nasıl ölçülür? (en az bir ölçülebilir ölçüt; ör. "görevlerin %90'ı üst kademeye aktarılmadan")
+  type: text
+  target: scalability.evaluation
+  note:
+    fa: deployment همیشه docker_compose است (بدون Kubernetes، §53).
+    en: deployment is always docker_compose (no Kubernetes, §53).
+    tr: deployment her zaman docker_compose'dur (Kubernetes yok, §53).

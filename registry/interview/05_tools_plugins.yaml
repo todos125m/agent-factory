@@ -1,18 +1,39 @@
 section: tools_plugins
 questions:
-  - id: tools_plugins.tools
-    text: "این Agent به کدام ابزارها نیاز دارد؟"
-    type: multi_choice
-    target: tools_plugins.tools
-    options:
-      - value: web_search
-        label: "جست‌وجوی وب"
-      - value: repo_read
-        label: "خواندن مخزن کد"
-      - value: repo_write
-        label: "نوشتن در مخزن کد"
-      - value: terminal
-        label: "اجرای دستور در ترمینال"
-      - value: deploy
-        label: "دیپلوی"
-    note: "می‌تواند خالی بماند — بدون permission متناظر در بخش Security، هیچ ابزاری فعال نمی‌شود."
+- id: tools_plugins.tools
+  text:
+    fa: این Agent به کدام ابزارها نیاز دارد؟
+    en: Which tools does this agent need?
+    tr: Bu ajanın hangi araçlara ihtiyacı var?
+  type: multi_choice
+  target: tools_plugins.tools
+  options:
+  - value: web_search
+    label:
+      fa: جست‌وجوی وب
+      en: Web search
+      tr: Web araması
+  - value: repo_read
+    label:
+      fa: خواندن مخزن کد
+      en: Read the code repository
+      tr: Kod deposunu okuma
+  - value: repo_write
+    label:
+      fa: نوشتن در مخزن کد
+      en: Write to the code repository
+      tr: Kod deposuna yazma
+  - value: terminal
+    label:
+      fa: اجرای دستور در ترمینال
+      en: Run commands in a terminal
+      tr: Terminalde komut çalıştırma
+  - value: deploy
+    label:
+      fa: دیپلوی
+      en: Deploy
+      tr: Yayına alma (deploy)
+  note:
+    fa: می‌تواند خالی بماند — بدون permission متناظر در بخش Security، هیچ ابزاری فعال نمی‌شود.
+    en: May stay empty — no tool is enabled without the matching permission in the Security section.
+    tr: Boş kalabilir — Güvenlik bölümündeki ilgili izin olmadan hiçbir araç etkinleşmez.

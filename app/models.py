@@ -68,6 +68,21 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class UserPreference(Base):
+    """How the UI talks to its owner (docs/HUMAN_GUIDED_FACTORY.md §4): language, depth of explanation, whether code
+    is shown. Display only: no permission, approval, budget or policy reads these (app/preferences.py). A None is
+    "not chosen yet" — the UI asks for the language on first entry and proposes a level the owner confirms."""
+
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    ui_locale: Mapped[str | None] = mapped_column(String(8))
+    audience_level: Mapped[str | None] = mapped_column(String(20))
+    code_visibility: Mapped[str | None] = mapped_column(String(10))  # None = follow audience_level
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 
