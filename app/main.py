@@ -15,7 +15,8 @@ from app import errors, sources
 from app.db import SessionLocal, engine, ensure_column_lengths, ensure_indexes, migrate
 from app.registry import sync_from_files
 from app.routers import (
-    agents, auth, benchmarks, blueprints, feedback, inbox, interview, manager, projects, settings, tasks, users,
+    agents, auth, benchmarks, blueprints, factory, feedback, inbox, interview, manager, projects, settings, tasks,
+    users,
 )
 from app.state_machine import ProjectPaused, TransitionError
 
@@ -86,6 +87,7 @@ app.include_router(feedback.router)
 app.include_router(inbox.router)
 app.include_router(blueprints.router)
 app.include_router(interview.router)
+app.include_router(factory.router)
 app.include_router(benchmarks.router)
 
 

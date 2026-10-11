@@ -295,7 +295,7 @@ function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(
 
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','inbox','projects','agents','benchmark','settings','observability'];
+var PAGES = ['dashboard','inbox','projects','agents','build','benchmark','settings','observability'];
 var root;
 
 function setNav(page){
@@ -325,7 +325,9 @@ function route(){
   else if (page === 'inbox') renderInbox(root);
   else if (page === 'projects' && parts[1]) renderProjectDetail(root, Number(parts[1]));
   else if (page === 'projects') renderProjectsList(root);
-  else if (page === 'agents' && parts[1] === 'new') renderAgentIntake(root);
+  else if (page === 'agents' && parts[1] === 'new') startBuild(root);
+  else if (page === 'agents' && parts[1] === 'blueprint') renderAgentIntake(root);
+  else if (page === 'build' && parts[1]) renderBuild(root, Number(parts[1]));
   else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'benchmark') renderBenchmark(root);
@@ -1047,7 +1049,21 @@ function renderProjectDetail(root, projectId){
 function renderAgentsList(root){
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('nav.agents')}),
     // A new agent starts a new interview; a refresh or language change inside one keeps its answers.
-    el('button', {class:'btn sm', onclick:function(){ saveIntakeAnswers({}); go('agents/new'); }}, t('agents.new_button'))));
+    el('button', {class:'btn sm', onclick:function(){ go('agents/new'); }}, t('agents.new_button')),
+    // The technical 14-section interview, for developers (the factory's brief maps onto it in PR3).
+    showCode() ? el('button', {class:'btn ghost sm', onclick:function(){ saveIntakeAnswers({}); go('agents/blueprint'); }}, t('agents.blueprint_button')) : null));
+  var builds = el('div', {class:'stack'});
+  root.appendChild(builds);
+  api('/factory/sessions').then(function(list){
+    if (!list.length) return;
+    builds.appendChild(el('h3', {text: t('build.in_progress')}));
+    list.forEach(function(b){
+      builds.appendChild(el('button', {class:'list-item', onclick:function(){ go('build/' + b.id); }},
+        el('div', {class:'top'}, el('b', {text: b.title || t('build.untitled', {id: b.id})}),
+          el('span', {class:'chip', text: lbl('fstage', b.stage)})),
+        el('span', {class:'muted', text: fmtTime(b.updated_at)})));
+    });
+  }).catch(function(){});
   var body = el('div', {class:'list'});
   root.appendChild(body);
   body.appendChild(loadingBox());
@@ -1275,6 +1291,202 @@ function readable(value){
   if (Array.isArray(value)) return value.length ? value.map(readable).join(t('list.sep')) : '—';
   if (typeof value === 'object') return Object.keys(value).map(function(k){ return k + ': ' + readable(value[k]); }).join(' · ');
   return String(value);
+}
+
+
+/* ============================== building an agent (app/factory.py) ============================== */
+
+var BUILD_STEPS = [
+  {key:'understand', stages:['DRAFT','CLARIFYING']},
+  {key:'brief', stages:['AWAITING_BRIEF_APPROVAL']},
+  {key:'design', stages:['DESIGNING','AWAITING_DESIGN_APPROVAL']},
+  {key:'build', stages:['BUILDING']},
+  {key:'evaluate', stages:['EVALUATING','AWAITING_ACTIVATION_APPROVAL']},
+  {key:'active', stages:['ACTIVE']}
+];
+
+function newRequestId(){
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, ''); } catch(e){}
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}
+
+// "+ New agent": one build per click. The request id survives a refresh of this route, so it never makes two.
+function startBuild(root){
+  var rid = null;
+  try { rid = sessionStorage.getItem('af_new_build'); } catch(e){}
+  if (!rid){ rid = newRequestId(); try { sessionStorage.setItem('af_new_build', rid); } catch(e){} }
+  root.appendChild(loadingBox());
+  api('/factory/sessions?locale=' + encodeURIComponent(I18N.locale()), {method:'POST', json:{request_id: rid}})
+    .then(function(st){
+      try { sessionStorage.removeItem('af_new_build'); } catch(e){}
+      location.replace('#build/' + st.session.id);
+    })
+    .catch(function(e){ clear(root); root.appendChild(errorBox(e.message, function(){ clear(root); startBuild(root); })); });
+}
+
+function renderBuild(root, id){
+  root.appendChild(el('div', {class:'page-head'},
+    el('button', {class:'btn ghost sm', onclick:function(){ go('agents'); }}, t('agents.back')),
+    el('h2', {id:'build-title', text: t('build.title')})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+  var st = null;
+
+  function load(){
+    clear(body); body.appendChild(loadingBox());
+    api('/factory/sessions/' + id + '?locale=' + encodeURIComponent(I18N.locale())).then(draw)
+      .catch(function(e){ clear(body); body.appendChild(errorBox(e.message, load)); });
+  }
+  // Every change names the revision it was made against and has its own request id (app/factory.py): another tab's
+  // change in between is a 409 that reloads, a double click applies once.
+  function send(path, payload, status){
+    payload.expected_revision = st.session.revision;
+    payload.request_id = newRequestId();
+    return api('/factory/sessions/' + id + path + '?locale=' + encodeURIComponent(I18N.locale()), {method:'POST', json: payload})
+      .then(draw)
+      .catch(function(e){
+        if (e.code === 'stale_revision' || e.code === 'stale_version'){ notify(t('build.stale')); load(); return; }
+        if (status) status.textContent = e.message; else notify(e.message);
+      });
+  }
+
+  function stepBar(stage){
+    var bar = el('ol', {class:'stepbar', 'aria-label': t('build.steps')});
+    var reached = true;
+    BUILD_STEPS.forEach(function(step){
+      var here = step.stages.indexOf(stage) >= 0;
+      var cls = here ? 'step now' : (reached ? 'step done' : 'step');
+      bar.appendChild(el('li', {class: cls, 'aria-current': here ? 'step' : null},
+        el('span', {class:'step-mark', 'aria-hidden':'true', text: here ? '●' : (reached ? '✓' : '○')}),
+        el('span', {text: t('build.step.' + step.key)})));
+      if (here) reached = false;
+    });
+    return bar;
+  }
+
+  function questionCard(q){
+    var card = el('div', {class:'card stack question-card'});
+    if (q.kind === 'clarify') card.appendChild(el('p', {class:'chip', text: t('build.clarify')}));
+    if (q.kind === 'conflict') card.appendChild(el('p', {class:'chip risk-medium', text: t('build.conflict.' + q.conflict)}));
+    card.appendChild(el('h3', {text: q.text}));
+    (q.help || []).forEach(function(h){ card.appendChild(el('p', {class:'muted', text: h})); });
+    if (q.field_key) card.appendChild(el('code', {dir:'ltr', text: 'brief.' + q.field_key}));
+    var input = el('textarea', {id:'build-answer', rows:'3', 'aria-label': q.text});
+    card.appendChild(input);
+    var status = el('p', {class:'err muted', role:'status'});
+    var next = el('button', {class:'btn', text: t('common.continue')});
+    next.addEventListener('click', function(){
+      if (!input.value.trim()){ status.textContent = t('build.answer_needed'); return; }
+      next.disabled = true;
+      send('/answer', {field: q.field, value: input.value}, status).then(function(){ next.disabled = false; });
+    });
+    var row = el('div', {class:'btn-row'}, next);
+    if (q.can_suggest){
+      var idk = el('button', {class:'btn ghost', text: t('build.dont_know')});
+      idk.addEventListener('click', function(){ idk.disabled = true; send('/answer', {field: q.field, dont_know: true}, status); });
+      row.appendChild(idk);
+      if (q.suggestion) card.appendChild(el('p', {class:'muted', text: t('build.suggestion_is', {value: q.suggestion})}));
+    }
+    card.appendChild(row);
+    card.appendChild(status);
+    setTimeout(function(){ try { input.focus(); } catch(e){} }, 0);
+    return card;
+  }
+
+  function fieldRow(f, editable){
+    var wrap = el('div', {class:'brief-row stack'});
+    var valueText = f.value === null || f.value === undefined ? t('build.open_question') : String(f.value);
+    wrap.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+      el('b', {text: lbl('bfield', f.field)}),
+      el('span', {class:'row'},
+        el('span', {class:'chip status-' + f.status, text: lbl('fstatus', f.status)}),
+        el('span', {class:'chip', text: lbl('fsource', f.source)}))));
+    var value = el('p', {dir:'auto', text: valueText});
+    wrap.appendChild(value);
+    if (editable){
+      var edit = el('button', {class:'btn ghost sm', text: t('build.edit')});
+      edit.addEventListener('click', function(){
+        clear(wrap);
+        var input = el('textarea', {rows:'2', 'aria-label': lbl('bfield', f.field)});
+        input.value = f.value || '';
+        var status = el('p', {class:'err muted', role:'status'});
+        var save = el('button', {class:'btn sm', text: t('common.save')});
+        save.addEventListener('click', function(){
+          if (!input.value.trim()){ status.textContent = t('build.answer_needed'); return; }
+          send('/answer', {field: f.field, value: input.value}, status);
+        });
+        wrap.appendChild(el('b', {text: lbl('bfield', f.field)}));
+        wrap.appendChild(input);
+        wrap.appendChild(el('div', {class:'btn-row'}, save,
+          el('button', {class:'btn ghost sm', onclick: function(){ draw(st); }}, t('build.cancel_edit'))));
+        wrap.appendChild(status);
+      });
+      wrap.appendChild(edit);
+    }
+    return wrap;
+  }
+
+  function summaryCard(){
+    var editable = ['DRAFT','CLARIFYING','AWAITING_BRIEF_APPROVAL','DESIGNING'].indexOf(st.session.stage) >= 0;
+    var card = el('div', {class:'card stack'}, el('h3', {text: t('build.summary_title')}));
+    [['from_you', t('build.from_you')], ['proposals', t('build.proposals')], ['unknowns', t('build.unknowns')]].forEach(function(sec){
+      var rows = st.summary[sec[0]];
+      if (!rows.length) return;
+      card.appendChild(el('h4', {text: sec[1]}));
+      rows.forEach(function(f){ card.appendChild(fieldRow(f, editable)); });
+    });
+    if (st.summary.missing.length){
+      card.appendChild(el('p', {class:'err muted', text: t('build.missing', {fields: st.summary.missing.map(function(f){ return lbl('bfield', f); }).join(t('list.sep'))})}));
+    }
+    if (showCode()){
+      card.appendChild(el('details', {class:'advanced'}, el('summary', {text: 'brief v' + st.brief.version + ' (JSON)'}),
+        el('pre', {class:'code', dir:'ltr', text: JSON.stringify(st.brief.fields, null, 2)})));
+    }
+    return card;
+  }
+
+  function actions(){
+    var stage = st.session.stage;
+    var status = el('p', {class:'err muted', role:'status'});
+    var row = el('div', {class:'btn-row'});
+    if (stage === 'AWAITING_BRIEF_APPROVAL'){
+      var ok = el('button', {class:'btn', text: t('build.approve'), disabled: st.can_approve ? null : 'disabled'});
+      ok.addEventListener('click', function(){ ok.disabled = true; send('/approve', {brief_version: st.brief.version}, status); });
+      row.appendChild(ok);
+    }
+    if (stage === 'AWAITING_BRIEF_APPROVAL' || stage === 'DESIGNING'){
+      row.appendChild(el('button', {class:'btn ghost', onclick: function(){ send('/request-changes', {}, status); }}, t('build.request_changes')));
+    }
+    if (stage === 'PAUSED') row.appendChild(el('button', {class:'btn', onclick: function(){ send('/pause', {paused: false}, status); }}, t('build.resume')));
+    else if (stage !== 'CANCELLED' && stage !== 'ACTIVE'){
+      row.appendChild(el('button', {class:'btn ghost', onclick: function(){ send('/pause', {paused: true}, status); }}, t('build.pause')));
+      row.appendChild(el('button', {class:'btn ghost', onclick: function(){
+        if (window.confirm(t('build.cancel_confirm'))) send('/cancel', {}, status);
+      }}, t('build.cancel')));
+    }
+    return el('div', {class:'card stack'}, row, status);
+  }
+
+  function draw(next){
+    st = next;
+    clear(body);
+    var title = document.getElementById('build-title');
+    if (title) title.textContent = st.session.title || t('build.title');
+    body.appendChild(stepBar(st.session.stage === 'PAUSED' ? null : st.session.stage));
+    body.appendChild(el('p', {class:'muted', text: t('build.policy', {policy: lbl('policy', st.session.interaction_policy)})}));
+    if (st.session.stage === 'PAUSED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.paused_banner')}));
+    if (st.session.stage === 'CANCELLED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.cancelled_banner')}));
+    if (st.approval) body.appendChild(el('p', {class:'chip status-COMPLETED', text: t('build.approved', {version: fmtNum(st.approval.version), time: fmtTime(st.approval.decided_at)})}));
+    if (st.session.stage === 'DESIGNING') body.appendChild(el('p', {class:'muted', text: t('build.next_design')}));
+    if (st.question){
+      body.appendChild(el('p', {class:'muted', text: t('build.progress', {answered: fmtNum(st.progress.answered), total: fmtNum(st.progress.total)})}));
+      body.appendChild(questionCard(st.question));
+    }
+    body.appendChild(summaryCard());
+    body.appendChild(actions());
+  }
+
+  load();
 }
 
 /* ============================== settings ============================== */

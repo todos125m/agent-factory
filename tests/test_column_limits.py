@@ -29,7 +29,9 @@ from app.gateway.providers import FakeProvider
 from app.gateway.service import Gateway, default_providers
 from app.main import app as api
 from app.manager import PlanStepIn
+from app.models import FactoryStage
 from app.preferences import AUDIENCE_LEVELS, CODE_VISIBILITY, LOCALES
+from app.settings_layers import INTERACTION_POLICIES, QUALITY_TARGETS
 from app.models import Agent, BudgetHold, Feedback, SettingsLayer, SettingsScope, Skill, Task
 from app.registry import MODEL_ROLES, RegistryError, parse_skill_file
 from app.routers.manager import get_gateway
@@ -88,6 +90,10 @@ API = {
     ("model_calls", "model"): (
         lambda c, x, v: send(c, "PUT", "/settings/global/0", {"models": {"manager": {"provider": "fake", "model": v}}}),
         "model"),
+    ("factory_sessions", "title"): (
+        lambda c, x, v: send(c, "POST", "/factory/sessions", {"title": v, "request_id": f"title-{len(v)}"}), "title"),
+    ("factory_requests", "request_id"): (
+        lambda c, x, v: send(c, "POST", "/factory/sessions", {"request_id": v}), "request_id"),
     ("agents", "name"): (
         lambda c, x, v: send(c, "POST", "/agents", {
             "name": v, "description": "d", "model_role": "research", "capabilities": ["column-limits-audit"]}),
@@ -121,6 +127,14 @@ CLOSED = {
     ("user_preferences", "ui_locale"): lambda: set(LOCALES),  # PreferencesUpdate's Literals
     ("user_preferences", "audience_level"): lambda: set(AUDIENCE_LEVELS),
     ("user_preferences", "code_visibility"): lambda: set(CODE_VISIBILITY),
+    ("factory_sessions", "stage"): lambda: {s.value for s in FactoryStage},  # app/factory.py sets them
+    ("factory_sessions", "stage_before_pause"): lambda: {s.value for s in FactoryStage},
+    ("factory_sessions", "locale"): lambda: set(LOCALES),
+    ("factory_sessions", "interaction_policy"): lambda: set(INTERACTION_POLICIES),
+    ("factory_sessions", "quality_target"): lambda: set(QUALITY_TARGETS),
+    ("approvals", "stage"): lambda: {s.value for s in FactoryStage},
+    ("approvals", "resource"): lambda: {"brief"},
+    ("approvals", "invalidated_reason"): lambda: {"brief_changed", "changes_requested"},
     ("auth_sessions", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest (app/auth.py::_digest)
     ("login_codes", "code_hash"): lambda: {"f" * 64},
 }
@@ -320,6 +334,7 @@ def test_every_integer_column_is_accounted_for():
         ("benchmark_runs", "rating"),  # 1 to 5
         ("model_calls", "input_tokens"), ("model_calls", "output_tokens"), ("model_calls", "cache_read_tokens"),
         ("model_calls", "cache_write_tokens"), ("model_calls", "web_searches"), ("model_calls", "duration_ms"),
+        ("factory_sessions", "revision"), ("brief_revisions", "version"), ("approvals", "resource_version"),
     }
     integers = {
         (table.name, column.name)
