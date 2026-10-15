@@ -1,0 +1,15 @@
+section: orchestration
+questions:
+  - id: orchestration.approval_gate
+    text: "خروجی این Agent چه زمانی باید پیش شما بیاید برای تأیید؟"
+    type: single_choice
+    target: orchestration.approval_gate
+    options:
+      - value: checkpoint
+        label: "checkpoint — فقط تصمیم‌های پرریسک"
+        recommended: true
+      - value: always
+        label: "always — هر خروجی، قبل از ادامه"
+      - value: auto
+        label: "auto — بدون توقف (فقط برای کارهای کم‌ریسک)"
+    note: "via_orchestrator همیشه true است — Agentها هرگز مستقیم به هم زنگ نمی‌زنند (§53)."

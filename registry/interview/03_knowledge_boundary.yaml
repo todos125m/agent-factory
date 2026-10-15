@@ -1,0 +1,26 @@
+section: knowledge_boundary
+questions:
+  - id: knowledge_boundary.allowed_sources
+    text: "این Agent مجاز است از کدام منابع استفاده کند؟ (چند مورد را انتخاب کن)"
+    type: multi_choice
+    target: knowledge_boundary.allowed_sources
+    options:
+      - value: task.input
+        label: "ورودی همان Task"
+        recommended: true
+      - value: memory.phase_current
+        label: "حافظه‌ی همین فاز/پروژه"
+        recommended: true
+      - value: skills
+        label: "Skillهای اختصاص‌داده‌شده"
+        recommended: true
+      - value: persona.knows
+        label: "دانش پرسونا (فقط برای Persona Agent)"
+        depends_on:
+          agent_core.agent_type: [persona]
+  - id: knowledge_boundary.general_llm_knowledge
+    text: "آیا اجازه دارد از دانش عمومی مدل (خارج از پروژه) هم استفاده کند؟"
+    type: confirm
+    target: knowledge_boundary.general_llm_knowledge
+    recommended: false
+    note: "طبق تصمیم صاحب پروژه همیشه باید false باشد؛ این سوال فقط برای تأیید آگاهانه است."

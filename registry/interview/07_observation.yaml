@@ -1,0 +1,18 @@
+section: observation
+questions:
+  - id: observation.record
+    text: "این پرسونا هنگام کار با محصول چه نوع واکنشی را باید ثبت کند؟"
+    type: multi_choice
+    target: observation.record
+    depends_on:
+      agent_core.agent_type: [persona]
+    options:
+      - value: cognitive
+        label: "ذهنی (فهمید/نفهمید)"
+        recommended: true
+      - value: emotional
+        label: "احساسی (خوشحال/کلافه)"
+        recommended: true
+      - value: behavioral
+        label: "رفتاری (کلیک/رهاکردن)"
+        recommended: true

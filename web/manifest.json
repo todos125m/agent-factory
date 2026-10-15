@@ -1,0 +1,17 @@
+{
+  "name": "Agent Factory",
+  "short_name": "کارخانه‌ی ایجنت",
+  "description": "AI Venture Operating System — تیم ایجنت‌های هوش مصنوعی برای اجرای یک ایده",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0E17",
+  "theme_color": "#0A0E17",
+  "dir": "rtl",
+  "lang": "fa",
+  "icons": [
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable"}
+  ]
+}

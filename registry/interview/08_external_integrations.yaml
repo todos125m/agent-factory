@@ -1,0 +1,6 @@
+section: external_integrations
+questions:
+  - id: external_integrations.services
+    text: "این Agent به کدام سرویس بیرونی نیاز دارد؟ (مثل ایمیل، تلگرام، دیتابیس خارجی — می‌تواند خالی باشد)"
+    type: text
+    target: external_integrations.services
