@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
+| Human-guided factory (Issue #2) | PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR5–PR7 pending | 🟡 PR4 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -247,6 +247,29 @@ from the currently approved brief and moves the build to BUILDING (PR5). The UI'
 | POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
 | POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
 | POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
+
+### Bounded runs (issue #2 PR4)
+
+A plan step whose agent doesn't exist is kept as a `BLOCKED` task (`reason: missing_specialist`) with all its
+dependency edges, so nothing that depends on it starts; once the agent is registered, `POST …/tasks/{id}/unblock`.
+A RUNNING task can be run step by step (`app/runtime.py`): a run snapshots its limits (steps, tool calls, time,
+failures), interaction policy, the agent's permissions and tools; a worker (`app/worker.py`) claims it with a lease and
+asks the agent's model for ONE action per step — finish, use a tool, or ask the owner — and code decides. A tool runs
+only if the tool gateway implements it (today `memory_search`, read-only), the agent has it, its permission is granted
+and its input is valid; under `step_by_step` the owner approves each tool action first. Tool output and the owner's
+answers reach the model as data, never as instructions. Waiting on the owner holds no worker and no transaction; the
+answer continues the same run. Every stop has a reason (`step_limit`, `time_limit`, `tool_limit`, `budget_exhausted`,
+`model_failed`, `schema_mismatch`, `run_cancelled`, `task_moved`). A worker that dies mid-tool leaves it `started`; the
+next one never re-runs it — it becomes `unknown` and the owner says whether it happened. The app runs
+`AGENT_FACTORY_WORKERS` worker threads (default 1; set 0 and run `python -m app.worker` separately to scale out).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/projects/{id}/tasks/{tid}/unblock` | BLOCKED → CREATED (READY when allowed) once the agent exists |
+| POST | `/projects/{id}/tasks/{tid}/runs` | queue a bounded run of a RUNNING task |
+| GET | `/projects/{id}/tasks/{tid}/runs`, `…/runs/{rid}` | the run with its steps and tool executions |
+| POST | `/projects/{id}/tasks/{tid}/runs/{rid}/respond` | `{text}` / `{approve}` / `{happened}` — what the run waits on |
+| POST | `/projects/{id}/tasks/{tid}/runs/{rid}/cancel` | stop it (not an undo) |
 
 ### Sign-in and access (owner decision d33)
 

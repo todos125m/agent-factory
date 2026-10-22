@@ -18,7 +18,8 @@ from app.storable import Int32, StorableIn, limit
 REGISTRY_DIR = Path(__file__).resolve().parent.parent / "registry"
 
 # Tools an agent may be granted (§27). Anything else is rejected at registration.
-KNOWN_TOOLS = {"web_search", "repo_read", "repo_write", "terminal", "deploy"}
+# memory_search: read-only, the project's own memory (the runtime's Tool Gateway implements it, app/runtime.py).
+KNOWN_TOOLS = {"web_search", "repo_read", "repo_write", "terminal", "deploy", "memory_search"}
 MODEL_ROLES = {"manager", "research", "coding", "cheap"}
 
 

@@ -1,4 +1,7 @@
+import os
 from contextlib import contextmanager
+
+os.environ.setdefault("AGENT_FACTORY_WORKERS", "0")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app import errors, sources
+from app import errors, sources, worker
 from app.db import SessionLocal, engine, ensure_column_lengths, ensure_indexes, migrate
 from app.registry import sync_from_files
 from app.routers import (
@@ -33,7 +33,10 @@ async def lifespan(_: FastAPI):
     with SessionLocal() as session:
         sync_from_files(session)
     sources.load_rules()  # fail fast on a broken registry/source_tiers.yaml, not mid task run
+    # Run workers (app/worker.py): AGENT_FACTORY_WORKERS threads, 0 when a separate `python -m app.worker` does it.
+    stop, _ = worker.start(SessionLocal)
     yield
+    stop.set()
 
 
 app = FastAPI(title="Agent Factory", version="0.2.0", lifespan=lifespan)

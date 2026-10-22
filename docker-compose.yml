@@ -24,6 +24,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Bounded runs are stepped by AGENT_FACTORY_WORKERS threads inside this service (default 1, see .env.example).
+    # To scale them out, set it to 0 here and add a service running `python -m app.worker` with the same env.
 
   # Optional, local-only model provider (model_access "ollama") — not started by `docker compose up`;
   # run `docker compose --profile ollama up` to include it, then `docker compose exec ollama ollama pull <model>`.

@@ -1,0 +1,114 @@
+"""runtime
+
+Revision ID: 0005_runtime
+Revises: 0004_design
+Create Date: 2026-10-22 18:48:27.096116
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision: str = '0005_runtime'
+down_revision: Union[str, Sequence[str], None] = '0004_design'
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    """Idempotent, like 0001–0004. BLOCKED is added to PostgreSQL's native task status enum (SQLite stores the
+    enum as text). A run, its steps and its tool executions are new tables."""
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing = set(inspector.get_table_names())
+    if bind.dialect.name == "postgresql":
+        op.execute("ALTER TYPE taskstatus ADD VALUE IF NOT EXISTS 'BLOCKED'")
+    if 'runs' not in existing:
+        op.create_table('runs',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('project_id', sa.Integer(), nullable=False),
+        sa.Column('task_id', sa.Integer(), nullable=False),
+        sa.Column('agent', sa.String(length=100), nullable=False),
+        sa.Column('agent_version', sa.Integer(), nullable=False),
+        sa.Column('model_role', sa.String(length=50), nullable=False),
+        sa.Column('state', sa.String(length=20), nullable=False),
+        sa.Column('reason', sa.String(length=60), nullable=True),
+        sa.Column('limits', sa.JSON(), nullable=False),
+        sa.Column('policy', sa.String(length=30), nullable=False),
+        sa.Column('permissions', sa.JSON(), nullable=False),
+        sa.Column('tools', sa.JSON(), nullable=False),
+        sa.Column('pending', sa.JSON(), nullable=True),
+        sa.Column('steps_used', sa.Integer(), nullable=False),
+        sa.Column('tool_calls', sa.Integer(), nullable=False),
+        sa.Column('failures', sa.Integer(), nullable=False),
+        sa.Column('lease_owner', sa.String(length=64), nullable=True),
+        sa.Column('lease_until', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_by', sa.Integer(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['task_id'], ['tasks.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+        )
+    op.create_index('ix_runs_project_id', 'runs', ['project_id'], unique=False, if_not_exists=True)
+    op.create_index('ix_runs_task_id', 'runs', ['task_id'], unique=False, if_not_exists=True)
+    if 'run_steps' not in existing:
+        op.create_table('run_steps',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('run_id', sa.Integer(), nullable=False),
+        sa.Column('n', sa.Integer(), nullable=False),
+        sa.Column('kind', sa.String(length=20), nullable=False),
+        sa.Column('payload', sa.JSON(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(['run_id'], ['runs.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('run_id', 'n')
+        )
+    op.create_index('ix_run_steps_run_id', 'run_steps', ['run_id'], unique=False, if_not_exists=True)
+    if 'tool_executions' not in existing:
+        op.create_table('tool_executions',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('run_id', sa.Integer(), nullable=False),
+        sa.Column('step_n', sa.Integer(), nullable=False),
+        sa.Column('tool', sa.String(length=50), nullable=False),
+        sa.Column('input_digest', sa.String(length=64), nullable=False),
+        sa.Column('idempotency_key', sa.String(length=100), nullable=False),
+        sa.Column('state', sa.String(length=20), nullable=False),
+        sa.Column('result', sa.JSON(), nullable=True),
+        sa.Column('started_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['run_id'], ['runs.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('idempotency_key')
+        )
+    op.create_index('ix_tool_executions_run_id', 'tool_executions', ['run_id'], unique=False, if_not_exists=True)
+    if "reason" not in {c["name"] for c in inspector.get_columns("tasks")}:
+        with op.batch_alter_table("tasks") as batch:
+            batch.add_column(sa.Column("reason", sa.String(length=60), nullable=True))
+
+
+def downgrade() -> None:
+    """Downgrade schema."""
+    # ### commands auto generated by Alembic - please adjust! ###
+    with op.batch_alter_table('tasks', schema=None) as batch_op:
+        batch_op.drop_column('reason')
+
+    with op.batch_alter_table('tool_executions', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_tool_executions_run_id'))
+
+    op.drop_table('tool_executions')
+    with op.batch_alter_table('run_steps', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_run_steps_run_id'))
+
+    op.drop_table('run_steps')
+    with op.batch_alter_table('runs', schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f('ix_runs_task_id'))
+        batch_op.drop_index(batch_op.f('ix_runs_project_id'))
+
+    op.drop_table('runs')
+    # ### end Alembic commands ###

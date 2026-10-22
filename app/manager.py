@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import context, memory, preferences, settings_layers, sources, storable
+from app.errors import AppError
 from app.events import record_event
 from app.gateway.service import Gateway
 from app.models import Agent, Project, RiskLevel, RunEvent, Task, TaskDependency, TaskStatus
@@ -233,33 +234,33 @@ def create_plan(session: Session, gateway: Gateway, project: Project) -> dict[st
 
 def _add_plan(session: Session, project: Project, plan: PlanIn) -> dict[str, Any]:
     """Stage a checked plan: its tasks (CREATED) and dependencies, and its events. The caller commits."""
-    task_ids: list[int | None] = []
+    task_ids: list[int] = []
     specialists_requested: list[str] = []
     for step in plan.steps:
         agent = None if step.agent == "manager" else session.scalar(
             select(Agent).where(Agent.name == step.agent, Agent.active)
         )
-        if agent is None:
-            record_event(
-                session, project.id, "specialist.requested", None,
-                title=step.title, agent=step.agent, goal=step.goal, risk=step.risk.value,
-            )
-            specialists_requested.append(step.agent)
-            task_ids.append(None)
-            continue
         task = Task(project_id=project.id, title=step.title, owner=step.agent, input={"goal": step.goal}, risk=step.risk)
+        if agent is None:
+            # Kept in the graph with every dependency, BLOCKED: what depends on it can't start without it (issue #2
+            # G7: the step and its edges used to be dropped, so a dependent ran without its prerequisite).
+            task.status, task.reason = TaskStatus.BLOCKED, "missing_specialist"
+            specialists_requested.append(step.agent)
         session.add(task)
         session.flush()
         task_ids.append(task.id)
+        if agent is None:
+            record_event(
+                session, project.id, "specialist.requested", task.id,
+                title=step.title, agent=step.agent, goal=step.goal, risk=step.risk.value,
+            )
 
     for step, tid in zip(plan.steps, task_ids):
-        if tid is None:
-            continue
-        deps = sorted({task_ids[d] for d in step.depends_on if task_ids[d] is not None})
+        deps = sorted({task_ids[d] for d in step.depends_on})
         session.get(Task, tid).dependencies = [TaskDependency(depends_on_id=d) for d in deps]
     session.flush()
 
-    created_ids = [tid for tid in task_ids if tid is not None]
+    created_ids = list(task_ids)
     record_event(session, project.id, "plan.proposed", None,
                  understanding=plan.understanding, assumptions=plan.assumptions, task_ids=created_ids)
     record_event(session, project.id, "approval.requested", None, task_ids=created_ids)
@@ -323,7 +324,8 @@ def reject_plan(session: Session, gateway: Gateway, project: Project, feedback: 
     plan = _propose_plan(session, gateway, project, feedback)
 
     tasks = (  # what is still undecided of the plan the owner rejected
-        session.scalars(select(Task).where(Task.id.in_(proposed_ids), Task.status == TaskStatus.CREATED)).all()
+        session.scalars(select(Task).where(Task.id.in_(proposed_ids),
+                                           Task.status.in_([TaskStatus.CREATED, TaskStatus.BLOCKED]))).all()
         if proposed_ids else []
     )
     deleted_ids = [t.id for t in tasks]
@@ -456,6 +458,10 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
     ensure_active(session, project, "run", task.id)
     if task.status is not TaskStatus.RUNNING:
         raise TransitionError(f"Task must be RUNNING to execute it (currently {task.status.value})")
+    from app.runtime import active_run  # local: app/runtime.py imports this module
+
+    if active_run(session, task) is not None:
+        raise AppError(409, "run_exists", "This task has an open step-by-step run; it finishes the task")
     check_task_move(session, task, TaskStatus.COMPLETED, dependency_statuses=[])
     started_from = _stamp(task)
 
@@ -512,3 +518,28 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
         ready_ids = _promote_ready_dependents(session, project, task)
     session.commit()
     return {"task": task, "ready_task_ids": ready_ids}
+
+
+def unblock(session: Session, project: Project, task: Task) -> dict[str, Any]:
+    """A BLOCKED task whose specialist exists now is CREATED again, and READY if its dependencies are done and its plan
+    was approved (a plan still pending decides that itself). 409 while the specialist is still missing."""
+    if task.status is not TaskStatus.BLOCKED:
+        raise TransitionError(f"Task is {task.status.value}, not BLOCKED")
+    agent = None if task.owner == "manager" else session.scalar(
+        select(Agent).where(Agent.name == task.owner, Agent.active))
+    if agent is None:
+        raise AppError(409, "missing_specialist", f"Specialist '{task.owner}' is still not registered", agent=task.owner)
+    check_task_move(session, task, TaskStatus.CREATED, dependency_statuses=[])
+    task.status, task.reason = TaskStatus.CREATED, None
+    record_event(session, project.id, "task.status_changed", task.id,
+                 **{"from": "BLOCKED", "to": "CREATED", "reason": "specialist available"})
+    ready: list[int] = []
+    proposed = session.scalars(select(RunEvent).where(RunEvent.project_id == project.id,
+                                                      RunEvent.type == "plan.proposed").order_by(RunEvent.id.desc()))
+    plan = next((e for e in proposed if task.id in (e.payload.get("task_ids") or [])), None)
+    approved = plan is not None and session.scalar(select(RunEvent.id).where(
+        RunEvent.project_id == project.id, RunEvent.type == "decision.plan_approved", RunEvent.id > plan.id).limit(1))
+    if approved:
+        ready = _promote_ready(session, project.id, [task], "specialist available")
+    commit_unless_paused(session, project.id, "unblock", task.id)
+    return {"task": task, "ready_task_ids": ready}

@@ -86,6 +86,10 @@ textarea{min-height:80px;resize:vertical}
 .chip.status-COMPLETED,.chip.status-REVIEWED{background:var(--good-soft);color:var(--good);border-color:transparent}
 .chip.status-FAILED,.chip.status-ESCALATED{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .chip.status-CANCELLED{color:var(--muted);text-decoration:line-through}
+.chip.status-BLOCKED{background:var(--warn-soft);color:var(--warn);border:1px dashed var(--warn)}
+.chip.run-waiting{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.chip.run-running,.chip.run-queued{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.run-steps{margin:0;padding-inline-start:20px;display:flex;flex-direction:column;gap:4px;font-size:13px;overflow-wrap:anywhere}
 .chip.risk-high{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .chip.risk-medium{background:var(--warn-soft);color:var(--warn);border-color:transparent}
 .chip.ev-fact{background:var(--good-soft);color:var(--good);border-color:transparent;flex:none}

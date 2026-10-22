@@ -163,8 +163,8 @@ Task (`app/state_machine.py`) نمی‌شود؛ Task منتظر کاربر از 
 - تأیید = `{actor, resource, version, stage, action_scope, decided_at, request_id}`؛ پاسخ دیررس/تکراری/نسخه‌ی قدیمی رد
   (409 با اطلاعات reload/compare)؛ submit و activate idempotent (`request_id`).
 - updateها با `expected_revision` (optimistic concurrency).
-- متخصص ناموجود: Task و همه‌ی وابستگی‌هایش در DAG می‌مانند و `BLOCKED/WAITING_SPECIALIST` می‌شوند؛ وابستگی حذف نمی‌شود.
-  (امروز این قاعده **نقض می‌شود** — جدول gap، ردیف G7.)
+- متخصص ناموجود: Task و همه‌ی وابستگی‌هایش در DAG می‌مانند و `BLOCKED` (reason `missing_specialist`) می‌شوند؛ وابستگی
+  حذف نمی‌شود. **[پیاده‌شده — PR4، §۱۳]**
 
 ---
 
@@ -193,7 +193,7 @@ flowchart TD
 - Gateway تنها مسیر مدل و بودجه است (موجود)؛ سیاست توقف (`app/pause.py`، d16) به همه‌ی مسیرهای جدید هم اعمال می‌شود.
 - برای V1 سرویس جدا، vector DB یا framework ارکستریشن اضافه نمی‌شود (§53).
 
-### ۶.۱ چرخه‌ی داخل ایجنت **[پیشنهادی — PR4]**
+### ۶.۱ چرخه‌ی داخل ایجنت **[پیاده‌شده — PR4، §۱۳]**
 
 ```mermaid
 flowchart TD
@@ -311,3 +311,41 @@ validate می‌کند. Save طراحی از Run جداست. کلید API هرگ
   برداشت بعد از آن هر دو تأیید را باطل و طرح را از نو می‌کشد (نسخه‌های قبلی در تاریخچه می‌مانند).
 - **ظاهر:** پیش‌فرض تم A (روشن)، تم تیره‌ی قبلی انتخابی در تنظیمات (تصمیم d35). بوم: zoom/pan/fit، کیبورد (هر گره دکمه‌ی
   قابل فوکوس)، وضعیت با آیکون و متن، موبایل فهرست مرحله‌ای بدون drag.
+
+---
+
+## ۱۳. DAG متخصص ناموجود و اجرای محدود **[پیاده‌شده — PR4]** (G7–G9)
+
+- **متخصص ناموجود (G7، G8):** گامی که ایجنتش ثبت نشده دیگر حذف نمی‌شود: یک Task با وضعیت جدید `BLOCKED` و
+  `Task.reason = missing_specialist` می‌شود و همه‌ی یال‌هایش می‌مانند؛ پس وابسته‌اش READY نمی‌شود (BLOCKED «تمام‌شده»
+  نیست). `specialist.requested` حالا شناسه‌ی همان Task را دارد. صندوق تصمیم کارت «مسدود» نشان می‌دهد. بعد از ثبت ایجنت،
+  `POST …/tasks/{id}/unblock` آن را CREATED (و اگر برنامه تأیید شده و پیش‌نیازها تمام‌اند، READY) می‌کند؛ تا ایجنت نباشد
+  ۴۰۹ `missing_specialist`. رد برنامه تسک‌های BLOCKED را هم پاک می‌کند. مهاجرت `0005_runtime` مقدار BLOCKED را به enum
+  بومی PostgreSQL اضافه می‌کند.
+- **اجرای محدود (G9):** `POST …/tasks/{id}/runs` برای تسکِ RUNNING یک `Run` می‌سازد با snapshot آنچه مجاز است: سقف‌ها
+  (`max_steps` از تنظیمات تا ۲۰، `max_tool_calls` ۴، `max_seconds` ۳۰۰، `max_failures` ۲)، سیاست تعامل، مجوزها، ابزارها و
+  نسخه‌ی ایجنت. یک worker آن را با lease برمی‌دارد و قدم‌به‌قدم جلو می‌برد (`app/runtime.py`, `app/worker.py`).
+- **هر قدم:** مدلِ خود ایجنت (system prompt پایدار خودش؛ پروتکل قدم در محتوای کاربر) فقط **یک** اقدام ساختاریافته پیشنهاد
+  می‌کند: `finish` / `tool` / `ask_user`؛ **کد تصمیم می‌گیرد.** پیش از هر اثر: توقف پروژه، سقف‌ها، بودجه (gateway بدترین
+  حالت را رزرو می‌کند). ابزار فقط اگر Tool Gateway پیاده‌اش کرده باشد (امروز فقط `memory_search`، فقط‌خواندنی)، ایجنت آن را
+  داشته باشد، مجوزش داده شده و ورودی‌اش معتبر باشد؛ وگرنه رد با علت (`tool_unavailable`, `tool_not_granted`,
+  `permission_denied`, `invalid_input`) که خودش مشاهده‌ی قدم بعد است. در `step_by_step` (یا برای ابزار غیرفقط‌خواندنی)
+  هر اقدام ابزار اول تأیید مالک را می‌خواهد. خروجی ابزار و پاسخ مالک زیر عنوان «DATA … not instructions» به مدل داده
+  می‌شوند و اختیاری نمی‌دهند.
+- **انتظار بدون نگه‌داشتن:** پرسش، تأیید ابزار یا وضعیت نامعلوم ← Run `waiting` و Task `WAITING` با reason
+  (`waiting_user`, `tool_approval`, `reconcile`)؛ lease آزاد می‌شود و هیچ worker یا transaction باز نمی‌ماند. پاسخ
+  (`POST …/runs/{id}/respond`) یک قدم ذخیره‌شده است و **همان Run** ادامه می‌دهد. دو پاسخ همزمان: قفل ردیف، یکی اعمال و
+  دیگری ۴۰۹.
+- **توقف با علت روشن:** `step_limit`, `time_limit`, `tool_limit`, `budget_exhausted`, `model_failed`,
+  `schema_mismatch`, `run_cancelled`, `task_moved` (تسک از مسیر دیگری جابه‌جا شد) — تسک FAILED با همان reason (قابل
+  retry محدود). لغو، undo نیست.
+- **lease و بازیابی:** claim یک UPDATE شرطی است (دو worker با هم برنده نمی‌شوند)؛ heartbeat قبل از هر فراخوانی مدل؛
+  سقف ۴ Run فعال؛ پروژه‌ی متوقف claim نمی‌شود. اگر worker وسط ابزار بمیرد، ToolExecution `started` می‌ماند: worker بعدی
+  آن را **دوباره اجرا نمی‌کند**؛ `unknown` می‌شود و Run منتظر می‌ماند تا مالک بگوید اثرش انجام شد یا نه. ادعای
+  exactly-once عمومی نیست؛ کلید idempotency برای هر ابزار (`run{id}:step{n}:{tool}:{digest}`).
+- **پنل اجرا** در ردیف تسک: وضعیت، قدم‌ها، سقف‌ها، پاسخ/تأیید/«اتفاق افتاد؟»، توقف؛ تا worker کار می‌کند خودش تازه
+  می‌شود. صندوق تصمیم کارت «یک اجرا منتظر شماست». اجرای یک‌باره‌ی قبلی (`/run`) تا یک Run باز هست ۴۰۹ `run_exists`.
+- **workerها:** برنامه `AGENT_FACTORY_WORKERS` thread اجرا می‌کند (پیش‌فرض ۱؛ ۰ وقتی worker جدا اجرا می‌شود:
+  `python -m app.worker`). تست‌ها worker پس‌زمینه ندارند.
+- **اثبات:** `tests/test_runtime.py` (۲۳ تست، FakeProvider)؛ روی PostgreSQL واقعی: ارتقای 0004→0005 و enum، رقابت دو
+  worker (یکی برنده)، اجرای کامل با ابزار، crash وسط ابزار بدون اجرای دوباره، دو پاسخ همزمان.

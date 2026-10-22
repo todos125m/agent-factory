@@ -389,7 +389,14 @@ function inboxCard(item, onDone){
     el('button', {class:'chip', style:'cursor:pointer;border:0', onclick:function(){ go('projects/' + item.project_id); }}, item.project_title)));
   card.appendChild(el('p', {}, el('b', {text: I18N.has('inbox.head.' + item.kind) ? t('inbox.head.' + item.kind) : ''}), item.challenge));
 
-  if (item.kind === 'ready'){
+  if (item.kind === 'blocked' || item.kind === 'waiting'){
+    var waiting = (item.options || [])[0] || {};
+    card.appendChild(el('div', {class:'row'}, el('span', {class:'chip', text: t('task.owner', {owner: waiting.owner || '—'})}),
+      riskChip(waiting.risk), el('span', {class:'chip', text: lbl('treason', waiting.reason)})));
+    if (item.why) card.appendChild(el('p', {class:'muted', text: item.why}));
+    card.appendChild(el('div', {class:'btn-row'},
+      el('button', {class:'btn sm', onclick:function(){ go('projects/' + item.project_id); }}, t('inbox.go_to_project'))));
+  } else if (item.kind === 'ready'){
     var task = (item.options || [])[0] || {};
     card.appendChild(el('div', {class:'row'}, el('span', {class:'chip', text: t('task.owner', {owner: task.owner || '—'})}), riskChip(task.risk)));
     if (item.why) card.appendChild(el('p', {class:'muted'}, el('b', {text:t('inbox.goal_label')}), item.why));
@@ -846,8 +853,10 @@ function renderProjectDetail(root, projectId){
         el('div', {class:'row'}, statusChip(task.status), riskChip(task.risk))),
       el('p', {class:'muted', text: t('task.owner', {owner: task.owner || '—'}) + (task.depends_on.length ? ' · ' + t('task.depends_on', {ids: '#' + task.depends_on.join(t('list.sep') + '#')}) : '')})
     );
+    if (task.reason && task.status !== 'BLOCKED') row.appendChild(el('p', {class:'muted', text: lbl('treason', task.reason)}));
+    if (task.status === 'BLOCKED') row.appendChild(unblockArea(task));
     if (task.status === 'READY') row.appendChild(checkpointArea(task));
-    if (task.status === 'RUNNING') row.appendChild(runArea(task));
+    if (task.status === 'RUNNING' || task.status === 'WAITING') row.appendChild(runPanel(task));
     // Not shown while RUNNING: a redo loop (COMPLETED -> READY -> RUNNING) keeps the old output
     // until this run finishes, and showing it next to the "اجرا" button would look like a fresh result.
     if (task.output && task.status !== 'RUNNING') row.appendChild(outputBox(task.output));
@@ -871,6 +880,135 @@ function renderProjectDetail(root, projectId){
             onclick:function(){ clear(holder); holder.appendChild(btn); btn.disabled = false; }}));
         });
     });
+    return holder;
+  }
+
+  function unblockArea(task){
+    var holder = el('div', {class:'stack'});
+    var status = el('p', {class:'err muted'});
+    var btn = el('button', {class:'btn sm', text:t('tasks.unblock')});
+    btn.addEventListener('click', function(){
+      btn.disabled = true; status.textContent = '';
+      api('/projects/' + projectId + '/tasks/' + task.id + '/unblock', {method:'POST'})
+        .then(reload).catch(function(e){ status.textContent = e.message; btn.disabled = false; });
+    });
+    holder.appendChild(el('p', {class:'muted', text:t('tasks.blocked_help', {owner: task.owner || '—'})}));
+    holder.appendChild(el('div', {class:'btn-row'}, btn));
+    holder.appendChild(status);
+    return holder;
+  }
+
+  // A bounded run (app/runtime.py): one step at a time by a worker; this shows its steps and what it waits on, and
+  // polls while a worker has it. A RUNNING task with no open run offers a new run or the one-shot run (runArea).
+  var OPEN_RUN = {queued: true, running: true, waiting: true};
+
+  function runStepText(s){
+    var p = s.payload || {};
+    if (s.kind === 'proposal') return lbl('raction', p.action) + (p.tool ? ' · ' + p.tool : '') + (p.reason ? ' — ' + p.reason : '');
+    if (s.kind === 'observation'){
+      if (p.refused) return (p.tool || '') + ' · ' + lbl('rrefused', p.refused);
+      if (p.error) return lbl('treason', p.error);
+      return (p.tool || '') + ' · ' + lbl('tstate', p.state) + (p.result ? ' — ' + JSON.stringify(p.result).slice(0, 300) : '');
+    }
+    if (s.kind === 'question') return p.text || '';
+    if (s.kind === 'approval'){
+      return p.kind === 'reconcile' ? t('run.reconcile_q', {tool: p.tool})
+        : t('run.tool_q', {tool: p.tool}) + (p.input ? ' ' + JSON.stringify(p.input) : '');
+    }
+    if (s.kind === 'answer'){
+      if (p.text) return p.text;
+      if (p.reconciled) return p.happened ? t('run.happened') : t('run.not_happened');
+      return p.approve ? t('run.approve') : t('run.deny');
+    }
+    if (s.kind === 'finish') return p.summary || '';
+    if (s.kind === 'stop') return lbl('treason', p.reason);
+    return '';
+  }
+
+  function runPanel(task){
+    var holder = el('div', {class:'stack run-panel'});
+    var base = '/projects/' + projectId + '/tasks/' + task.id + '/runs';
+    var shown = null;  // the state last drawn
+
+    function load(){
+      api(base).then(function(runs){
+        var run = runs[0];
+        var state = run && OPEN_RUN[run.state] ? run.state : null;
+        // The task moves with the run (RUNNING <-> WAITING, then COMPLETED/FAILED): redraw the page around it.
+        if (shown && shown !== state && (state === 'waiting' || shown === 'waiting' || !state)){ reload(); return; }
+        shown = state;
+        if (state){ draw(run); return; }
+        drawIdle(run);
+      }).catch(function(e){ clear(holder); holder.appendChild(errorBox(e.message, load)); });
+    }
+
+    function act(button, path, body){
+      button.disabled = true;
+      return api(base + path, {method:'POST', json: body}).then(load)
+        .catch(function(e){ button.disabled = false; alert(e.message); });
+    }
+
+    function drawIdle(last){
+      clear(holder);
+      if (last){
+        holder.appendChild(el('p', {class:'muted'}, el('b', {text:t('run.last') + ': '}),
+          lbl('rstate', last.state) + (last.reason ? ' · ' + lbl('treason', last.reason) : '')));
+      }
+      if (task.status !== 'RUNNING') return;
+      var start = el('button', {class:'btn sm', text:t('run.start')});
+      start.addEventListener('click', function(){ act(start, '', undefined); });
+      holder.appendChild(el('div', {class:'btn-row'}, start));
+      holder.appendChild(runArea(task));
+    }
+
+    function draw(run){
+      clear(holder);
+      holder.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+        el('b', {text:t('run.title', {id: run.id})}),
+        el('div', {class:'row'}, el('span', {class:'chip run-' + run.state, text: lbl('rstate', run.state)}),
+          run.reason ? el('span', {class:'chip', text: lbl('treason', run.reason)}) : null)));
+      holder.appendChild(el('p', {class:'muted', text:t('run.progress', {steps: run.steps_used, max: run.limits.max_steps,
+        tools: run.tool_calls, max_tools: run.limits.max_tool_calls})}));
+      var steps = el('ol', {class:'run-steps'});
+      run.steps.forEach(function(s){
+        steps.appendChild(el('li', {}, el('b', {text: lbl('rstep', s.kind) + ': '}), runStepText(s)));
+      });
+      if (run.steps.length) holder.appendChild(steps);
+
+      var pending = run.pending || {};
+      if (run.state === 'waiting' && pending.kind === 'question'){
+        var answer = el('textarea', {placeholder:t('run.answer_placeholder')});
+        var send = el('button', {class:'btn sm', text:t('run.send')});
+        send.addEventListener('click', function(){
+          if (!answer.value.trim()) return;
+          act(send, '/' + run.id + '/respond', {text: answer.value.trim()});
+        });
+        holder.appendChild(answer);  // the question is the last step listed above
+        holder.appendChild(el('div', {class:'btn-row'}, send));
+      } else if (run.state === 'waiting' && pending.kind === 'tool_approval'){
+        var yes = el('button', {class:'btn sm', text:t('run.approve')});
+        var no = el('button', {class:'btn ghost sm', text:t('run.deny')});
+        yes.addEventListener('click', function(){ act(yes, '/' + run.id + '/respond', {approve: true}); });
+        no.addEventListener('click', function(){ act(no, '/' + run.id + '/respond', {approve: false}); });
+        holder.appendChild(el('div', {class:'btn-row'}, yes, no));
+      } else if (run.state === 'waiting' && pending.kind === 'reconcile'){
+        var did = el('button', {class:'btn sm', text:t('run.happened')});
+        var didnt = el('button', {class:'btn ghost sm', text:t('run.not_happened')});
+        did.addEventListener('click', function(){ act(did, '/' + run.id + '/respond', {happened: true}); });
+        didnt.addEventListener('click', function(){ act(didnt, '/' + run.id + '/respond', {happened: false}); });
+        holder.appendChild(el('div', {class:'btn-row'}, did, didnt));
+      }
+      holder.appendChild(el('p', {class:'muted', text: run.state === 'waiting' ? t('run.waiting_hint') : t('run.working')}));
+      var cancel = el('button', {class:'btn ghost sm', text:t('run.cancel')});
+      cancel.addEventListener('click', function(){ act(cancel, '/' + run.id + '/cancel', undefined); });
+      holder.appendChild(el('div', {class:'btn-row'}, cancel));
+      if (run.state !== 'waiting'){
+        setTimeout(function(){ if (holder.isConnected) load(); }, 1500);
+      }
+    }
+
+    holder.appendChild(loadingBox());
+    load();
     return holder;
   }
 

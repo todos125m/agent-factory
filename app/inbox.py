@@ -1,6 +1,6 @@
 """Decision inbox (owner-facing): everything across all projects waiting on the owner —
-plans awaiting approval, checkpoints awaiting a decision, and READY tasks with no checkpoint yet
-(waiting to start). A paused project lists nothing until it is resumed (owner decision d17): every
+plans awaiting approval, checkpoints awaiting a decision, READY tasks with no checkpoint yet
+(waiting to start), BLOCKED tasks (no specialist) and runs waiting on the owner (app/runtime.py). A paused project lists nothing until it is resumed (owner decision d17): every
 action on its cards is refused while paused, and its own page still shows its plan and tasks.
 Derived from existing RunEvents and Task state; nothing new is stored (§ decision inbox).
 """
@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Project, RunEvent, Task, TaskStatus
+from app.models import Project, Run, RunEvent, Task, TaskStatus
 
 
 def _pending_plan(events: list[RunEvent]) -> RunEvent | None:
@@ -100,6 +100,40 @@ def list_inbox(session: Session, owner_id: int) -> list[dict[str, Any]]:
                 "recommended": cp_event.payload.get("recommended"),
                 "why": cp_event.payload.get("why", ""),
                 "created_at": cp_event.created_at,
+            })
+
+        for task in session.scalars(
+            select(Task).where(Task.project_id == project.id, Task.status == TaskStatus.BLOCKED).order_by(Task.id)
+        ):
+            goal = (task.input or {}).get("goal")
+            items.append({
+                "kind": "blocked",
+                "project_id": project.id,
+                "project_title": project.title,
+                "task_id": task.id,
+                "challenge": task.title,
+                "options": [{"title": task.title, "owner": task.owner, "risk": task.risk.value, "reason": task.reason}],
+                "recommended": None,
+                "why": goal if isinstance(goal, str) else "",
+                "created_at": task.updated_at,
+            })
+
+        for run, task in session.execute(
+            select(Run, Task).join(Task, Task.id == Run.task_id)
+            .where(Run.project_id == project.id, Run.state == "waiting", Task.status == TaskStatus.WAITING)
+            .order_by(Run.id)
+        ).all():
+            pending = run.pending or {}
+            items.append({
+                "kind": "waiting",
+                "project_id": project.id,
+                "project_title": project.title,
+                "task_id": task.id,
+                "challenge": task.title,
+                "options": [{"title": task.title, "owner": task.owner, "risk": task.risk.value, "reason": run.reason}],
+                "recommended": None,
+                "why": str(pending.get("text") or pending.get("tool") or ""),
+                "created_at": task.updated_at,
             })
 
         for task in session.scalars(
