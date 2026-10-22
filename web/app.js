@@ -1606,6 +1606,77 @@ function renderBuild(root, id){
   }
 
 
+  // ---------- build, evaluation, activation (app/build.py) ----------
+  function buildSection(b){
+    var stage = st.session.stage;
+    var card = el('div', {class:'card stack build-card'}, el('h3', {text: t('agentbuild.title')}));
+    var status = el('p', {class:'err muted', role:'status'});
+    var c = b.candidate;
+    if (stage === 'BUILDING'){
+      var next = c ? c.version + 1 : 1;
+      card.appendChild(el('p', {class:'muted', text: t('agentbuild.build_help', {version: fmtNum(next)})}));
+      var mk = el('button', {class:'btn', text: t('agentbuild.build')});
+      mk.addEventListener('click', function(){ mk.disabled = true; send('/build', {}, status); });
+      card.appendChild(el('div', {class:'btn-row'}, mk));
+    }
+    if (c){
+      card.appendChild(el('p', {}, el('b', {text: t('agentbuild.candidate', {version: fmtNum(c.version), agent: c.agent}) + ' · '}),
+        el('span', {class:'chip vstate-' + c.state, text: lbl('vstate', c.state)})));
+      card.appendChild(el('p', {class:'muted', text: c.spec.description}));
+      card.appendChild(el('details', {class:'advanced'}, el('summary', {text: t('agentbuild.instructions')}),
+        el('pre', {class:'code', dir:'ltr', text: c.spec.instructions})));
+    }
+    if (stage === 'EVALUATING' && c && c.state === 'built'){
+      card.appendChild(el('p', {class:'muted', text: t('agentbuild.evaluate_help', {used: fmtNum(b.rounds_used + 1), max: fmtNum(b.max_rounds)})}));
+      var ev = el('button', {class:'btn', text: t('agentbuild.evaluate')});
+      ev.addEventListener('click', function(){ ev.disabled = true; ev.textContent = t('agentbuild.evaluating'); send('/evaluate', {}, status); });
+      card.appendChild(el('div', {class:'btn-row'}, ev));
+    }
+    b.evaluations.slice(0, 1).forEach(function(e){
+      var box = el('div', {class:'stack'}, el('b', {text: t('agentbuild.round', {round: fmtNum(e.round), version: fmtNum(e.agent_version), verdict: lbl('verdict', e.verdict)})}));
+      e.cases.forEach(function(k){
+        var ok = k.verdict === 'PASS';
+        var reply = typeof k.output === 'string' ? k.output : (k.output && k.output.summary) || '';
+        box.appendChild(el('div', {class:'case ' + (ok ? 'case-pass' : 'case-fail')},
+          el('p', {}, el('b', {text: (ok ? '✓ ' : '✗ ') + lbl('dtest', k.kind) + ': '}), k.input || '—'),
+          el('p', {class:'muted', text: t('agentbuild.reply') + ': ' + reply}),
+          el('p', {class:'muted', text: k.reason === 'invalid_output' ? t('agentbuild.invalid_output') : (k.reason === 'judge_invalid' ? t('agentbuild.judge_invalid') : k.reason)})));
+      });
+      if (e.verdict === 'changes_required' && stage !== 'EVALUATING') box.appendChild(el('p', {class:'notice', text: t('agentbuild.failed_help')}));
+      card.appendChild(box);
+    });
+    if (stage === 'AWAITING_ACTIVATION_APPROVAL' && c){
+      card.appendChild(el('p', {class:'muted', text: t('agentbuild.activate_help')}));
+      var on = el('button', {class:'btn', text: t('agentbuild.activate', {version: fmtNum(c.version)})});
+      on.addEventListener('click', function(){ on.disabled = true; send('/activate', {agent_version: c.version}, status); });
+      card.appendChild(el('div', {class:'btn-row'}, on));
+    }
+    var active = (b.history || []).filter(function(v){ return v.state === 'active'; })[0];
+    if (active) card.appendChild(el('p', {class:'chip status-COMPLETED', text: t('agentbuild.active', {agent: active.agent, version: fmtNum(active.version)})}));
+    if ((b.history || []).length > 1 || (active && stage === 'ACTIVE')){
+      var list = el('div', {class:'stack', style:'gap:6px'}, el('b', {text: t('agentbuild.history')}));
+      b.history.forEach(function(v){
+        var row = el('div', {class:'row', style:'justify-content:space-between'},
+          el('span', {text: 'v' + v.version + ' · ' + lbl('vstate', v.state)}));
+        if (v.state === 'retired'){
+          var back = el('button', {class:'btn ghost sm', text: t('agentbuild.rollback', {version: fmtNum(v.version)})});
+          back.addEventListener('click', function(){
+            if (!window.confirm(t('agentbuild.rollback_confirm', {version: fmtNum(v.version)}))) return;
+            back.disabled = true;
+            api('/factory/agents/' + encodeURIComponent(v.agent) + '/rollback', {method:'POST', json:{to_version: v.version, request_id: newRequestId()}})
+              .then(load).catch(function(err){ back.disabled = false; status.textContent = err.message; });
+          });
+          row.appendChild(back);
+        }
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
+    card.appendChild(status);
+    return card;
+  }
+
+
   // ---------- the design canvas (app/design.py) ----------
   var selectedBranch = null;
   var view = {x: 0, y: 0, w: 1000, h: 700};
@@ -1832,6 +1903,7 @@ function renderBuild(root, id){
       body.appendChild(questionCard(st.question));
     }
     if (st.design) body.appendChild(designSection(st.design));
+    if (st.build) body.appendChild(buildSection(st.build));
     body.appendChild(summaryCard());
     body.appendChild(actions());
   }

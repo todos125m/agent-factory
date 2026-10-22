@@ -463,7 +463,7 @@ class Approval(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     stage: Mapped[str] = mapped_column(String(40))
-    resource: Mapped[str] = mapped_column(String(30))  # "brief"
+    resource: Mapped[str] = mapped_column(String(30))  # "brief" | "blueprint" | "agent_version"
     resource_version: Mapped[int] = mapped_column(Integer)
     scope: Mapped[list[str]] = mapped_column(JSON, default=list)  # the brief fields it covers
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -569,3 +569,39 @@ class ToolExecution(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentVersion(Base):
+    """One immutable build of a designed agent (app/build.py): the registry spec made from one approved blueprint
+    version. It becomes the active Agent only after its evaluation passed and the owner approved it; versions of one
+    agent name are numbered across its builds, and an earlier active one can be brought back."""
+
+    __tablename__ = "agent_versions"
+    __table_args__ = (UniqueConstraint("agent_name", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
+    agent_name: Mapped[str] = mapped_column(String(100), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    blueprint_version: Mapped[int] = mapped_column(Integer)
+    spec: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    state: Mapped[str] = mapped_column(String(20), default="built")  # built|passed|failed|active|retired
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Evaluation(Base):
+    """One evaluation round of a version: every test case's reply, the code check and the judge's verdict."""
+
+    __tablename__ = "evaluations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
+    agent_version_id: Mapped[int] = mapped_column(ForeignKey("agent_versions.id", ondelete="CASCADE"), index=True)
+    round: Mapped[int] = mapped_column(Integer)
+    verdict: Mapped[str] = mapped_column(String(20))  # passed | changes_required
+    cases: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

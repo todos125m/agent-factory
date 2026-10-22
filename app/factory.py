@@ -426,6 +426,7 @@ def state(db: Session, fs: FactorySession, *, locale: str, level: str, duplicate
             "actor_id": approval.actor_id, "decided_at": approval.decided_at,
         },
         "design": _design_view(db, fs),
+        "build": _build_view(db, fs),
         "events": [{"type": e.type, "payload": e.payload, "created_at": e.created_at} for e in events],
         "duplicate": duplicate,
     }
@@ -435,6 +436,12 @@ def _design_view(db: Session, fs: FactorySession) -> dict[str, Any] | None:
     from app import design  # local import: app.design builds on this module
 
     return design.view(db, fs) if S(fs.stage) in AFTER_BRIEF | {S.PAUSED, S.CANCELLED} else None
+
+
+def _build_view(db: Session, fs: FactorySession) -> dict[str, Any] | None:
+    from app import build  # local import: app.build builds on this module
+
+    return build.view(db, fs)
 
 
 def list_sessions(db: Session, owner: User) -> list[FactorySession]:

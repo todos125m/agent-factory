@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import Field
 from sqlalchemy.orm import Session
 
-from app import design, factory, preferences
+from app import build, design, factory, preferences
 from app.auth import current_user
 from app.db import get_session
 from app.gateway.service import Gateway
@@ -184,3 +184,62 @@ def design_assist(session_id: int, body: Change, locale: str | None = None, db: 
     except ProviderError as e:
         raise AppError(502, "provider_unavailable", str(e)) from e
     return _view(db, me, factory.load_session(db, fs.id, me), locale, duplicate=not applied)
+
+
+# ---------- build, evaluation, activation (app/build.py) ----------
+
+
+class ActivateIn(Change):
+    agent_version: Int32
+
+
+class RollbackIn(StorableIn):
+    to_version: Int32
+    request_id: str = RequestId
+
+
+@router.post("/sessions/{session_id}/build")
+def build_agent(session_id: int, body: Change, locale: str | None = None, db: Session = Depends(get_session),
+                me: User = Depends(current_user)) -> dict[str, Any]:
+    """The approved design becomes a candidate version: deterministic, free, not active."""
+    fs, applied = build.build(db, me, session_id, expected_revision=body.expected_revision, request_id=body.request_id)
+    return _view(db, me, factory.load_session(db, fs.id, me), locale, duplicate=not applied)
+
+
+@router.post("/sessions/{session_id}/evaluate")
+def evaluate_agent(session_id: int, body: Change, locale: str | None = None, db: Session = Depends(get_session),
+                   me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)) -> dict[str, Any]:
+    """Paid: each test case through the candidate, then the judge, within the build's budget (402 when over)."""
+    from app.errors import AppError
+    from app.gateway.providers import ProviderError
+    from app.gateway.service import BudgetExceeded
+
+    try:
+        fs, applied = build.evaluate(db, gateway, me, session_id, expected_revision=body.expected_revision,
+                                     request_id=body.request_id)
+    except BudgetExceeded as e:
+        raise AppError(402, "budget_exceeded", str(e)) from e
+    except ProviderError as e:
+        raise AppError(502, "provider_unavailable", str(e)) from e
+    return _view(db, me, factory.load_session(db, fs.id, me), locale, duplicate=not applied)
+
+
+@router.post("/sessions/{session_id}/activate")
+def activate_agent(session_id: int, body: ActivateIn, locale: str | None = None, db: Session = Depends(get_session),
+                   me: User = Depends(current_user)) -> dict[str, Any]:
+    """The owner's final approval of exactly the version that passed: only now is the agent active."""
+    fs, applied = build.activate(db, me, session_id, agent_version=body.agent_version,
+                                 expected_revision=body.expected_revision, request_id=body.request_id)
+    return _view(db, me, factory.load_session(db, fs.id, me), locale, duplicate=not applied)
+
+
+@router.get("/agents/{name}/versions")
+def agent_versions(name: str, db: Session = Depends(get_session), me: User = Depends(current_user)):
+    return build.versions(db, me, name)
+
+
+@router.post("/agents/{name}/rollback")
+def rollback_agent(name: str, body: RollbackIn, db: Session = Depends(get_session), me: User = Depends(current_user)):
+    """Bring back a version that was active before; the current one is retired (nothing is deleted)."""
+    build.rollback(db, me, name, to_version=body.to_version, request_id=body.request_id)
+    return build.versions(db, me, name)

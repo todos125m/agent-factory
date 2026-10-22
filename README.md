@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR5–PR7 pending | 🟡 PR4 |
+| Human-guided factory (Issue #2) | PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR6–PR7 pending | 🟡 PR5 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -247,6 +247,26 @@ from the currently approved brief and moves the build to BUILDING (PR5). The UI'
 | POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
 | POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
 | POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
+
+### Building, evaluating, activating (issue #2 PR5)
+
+After the design is approved, **Build** turns it into an immutable `AgentVersion` (free, deterministic): the
+registry spec plus instructions written from the design. Nothing is active. **Run the evaluation** (paid, only on the
+owner's click, held against the build's budget) sends every test case of the design to the candidate; a reply that
+breaks the agent's JSON contract fails by code, the rest are judged PASS/FAIL with a reason by a judge model (role
+`cheap`, skill `evaluate-agent`). All PASS → the owner activates exactly that version; otherwise the build goes back
+to the design with the failed cases (at most 3 evaluation rounds per build). Activation registers the agent; a newer
+version retires the older one, and `POST /factory/agents/{name}/rollback` brings back one that was active before.
+An admin can still register an agent directly (`POST /agents`); an agent the factory builds is active only after a
+PASS and the owner's approval.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/factory/sessions/{id}/build` | approved design → candidate version (free) |
+| POST | `/factory/sessions/{id}/evaluate` | paid evaluation of every test case |
+| POST | `/factory/sessions/{id}/activate` | `{agent_version, …}` — the owner's final approval |
+| GET | `/factory/agents/{name}/versions` | the agent's versions and verdicts |
+| POST | `/factory/agents/{name}/rollback` | `{to_version, request_id}` |
 
 ### Bounded runs (issue #2 PR4)
 
