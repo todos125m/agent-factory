@@ -1467,6 +1467,217 @@ function renderBuild(root, id){
     return el('div', {class:'card stack'}, row, status);
   }
 
+
+  // ---------- the design canvas (app/design.py) ----------
+  var selectedBranch = null;
+  var view = {x: 0, y: 0, w: 1000, h: 700};
+
+  function fmtValue(v){
+    if (v === null || v === undefined || v === '') return t('build.open_question');
+    if (typeof v === 'boolean') return v ? t('common.yes') : t('common.no');
+    if (Array.isArray(v)){
+      if (!v.length) return '—';
+      if (typeof v[0] === 'object') return v.map(function(c){ return lbl('dtest', c.kind) + ': ' + (c.input || '—') + ' → ' + (c.expect || '—'); }).join(' | ');
+      return v.join(t('list.sep'));
+    }
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+  function statusIcon(status){ return status === 'confirmed' ? '✓' : (status === 'incomplete' ? '⚠' : '◌'); }
+
+  function designActions(d){
+    var status = el('p', {class:'err muted', role:'status'});
+    var row = el('div', {class:'btn-row'});
+    var assist = el('button', {class:'btn ghost', text: t('design.assist')});
+    assist.addEventListener('click', function(){ assist.disabled = true; send('/design/assist', {}, status).then(function(){ assist.disabled = false; }); });
+    row.appendChild(assist);
+    var older = (d.history || []).filter(function(h){ return h.version < d.version; })[0];
+    if (older){
+      row.appendChild(el('button', {class:'btn ghost', onclick: function(){ send('/design/revert', {to_version: older.version}, status); }},
+        t('design.undo', {version: fmtNum(older.version)})));
+    }
+    if (st.session.stage === 'AWAITING_DESIGN_APPROVAL'){
+      var ok = el('button', {class:'btn', text: t('design.approve'), disabled: d.can_approve ? null : 'disabled'});
+      ok.addEventListener('click', function(){ ok.disabled = true; send('/design/approve', {blueprint_version: d.version}, status); });
+      row.appendChild(ok);
+    }
+    var b = d.budget;
+    return el('div', {class:'card stack'},
+      el('p', {class:'muted', text: t('design.version', {version: fmtNum(d.version), brief: fmtNum(d.brief_version)})}),
+      el('p', {class:'muted', text: t('design.budget', {spent: fmtMoney(b.spent_usd), limit: fmtMoney(b.limit_usd)})}),
+      row, status);
+  }
+
+  function canvas(d){
+    var NS = 'http://www.w3.org/2000/svg';
+    function svgEl(tag, attrs, text){
+      var n = document.createElementNS(NS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+    var svg = svgEl('svg', {class:'canvas', role:'group', 'aria-label': t('design.canvas_label'),
+      viewBox: [view.x, view.y, view.w, view.h].join(' ')});
+    var cx = 500, cy = 350, r = 265, n = d.branches.length;
+    var edges = svgEl('g', {}), nodes = svgEl('g', {});
+    d.branches.forEach(function(b, i){
+      var a = -Math.PI / 2 + i * 2 * Math.PI / n;
+      var x = cx + r * Math.cos(a) * 1.35, y = cy + r * Math.sin(a);
+      // A soft curve (organic branches), bending a little sideways.
+      var mx = (cx + x) / 2 + 40 * Math.sin(a), my = (cy + y) / 2 - 40 * Math.cos(a);
+      edges.appendChild(svgEl('path', {class:'edge ' + b.status, d: 'M' + cx + ',' + cy + ' Q' + mx + ',' + my + ' ' + x + ',' + y}));
+      var g = svgEl('g', {class:'node ' + b.status + (selectedBranch === b.key ? ' selected' : ''), tabindex:'0', role:'button',
+        'aria-label': lbl('branch', b.key) + ' — ' + lbl('dstatus', b.status), transform: 'translate(' + (x - 95) + ',' + (y - 34) + ')'});
+      g.appendChild(svgEl('rect', {width:'190', height:'68', rx:'14'}));
+      g.appendChild(svgEl('text', {x:'95', y:'30', 'text-anchor':'middle'}, lbl('branch', b.key)));
+      g.appendChild(svgEl('text', {x:'95', y:'52', 'text-anchor':'middle', class:'small'}, statusIcon(b.status) + ' ' + lbl('dstatus', b.status)));
+      function open(){ selectedBranch = b.key; draw(st); }
+      g.addEventListener('click', open);
+      g.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); } });
+      nodes.appendChild(g);
+    });
+    svg.appendChild(edges);
+    var center = svgEl('g', {class:'center'});
+    center.appendChild(svgEl('rect', {x: cx - 130, y: cy - 40, width:'260', height:'80', rx:'40'}));
+    var title = (st.session.title || d.blueprint.agent_core.description || '').slice(0, 28);
+    center.appendChild(svgEl('text', {x: cx, y: cy + 6, 'text-anchor':'middle'}, title || t('build.title')));
+    svg.appendChild(center);
+    svg.appendChild(nodes);
+
+    // Zoom, pan, fit: only the view moves; nothing is changed or run (FACTORY_UI_SPEC §3.2).
+    function setView(){ svg.setAttribute('viewBox', [view.x, view.y, view.w, view.h].join(' ')); }
+    function zoom(f){
+      var nw = Math.min(2000, Math.max(400, view.w * f)), nh = nw * 0.7;
+      view.x += (view.w - nw) / 2; view.y += (view.h - nh) / 2; view.w = nw; view.h = nh; setView();
+    }
+    svg.addEventListener('wheel', function(e){ e.preventDefault(); zoom(e.deltaY > 0 ? 1.1 : 0.9); }, {passive: false});
+    var drag = null;
+    svg.addEventListener('pointerdown', function(e){ if (e.target === svg){ drag = {x: e.clientX, y: e.clientY}; svg.setPointerCapture(e.pointerId); } });
+    svg.addEventListener('pointermove', function(e){
+      if (!drag) return;
+      var k = view.w / svg.getBoundingClientRect().width;
+      view.x -= (e.clientX - drag.x) * k * (document.documentElement.dir === 'rtl' ? 1 : 1);
+      view.y -= (e.clientY - drag.y) * k;
+      drag = {x: e.clientX, y: e.clientY}; setView();
+    });
+    svg.addEventListener('pointerup', function(){ drag = null; });
+    var tools = el('div', {class:'canvas-tools'},
+      el('button', {type:'button', 'aria-label': t('design.zoom_in'), onclick: function(){ zoom(0.85); }}, '+'),
+      el('button', {type:'button', 'aria-label': t('design.zoom_out'), onclick: function(){ zoom(1.18); }}, '−'),
+      el('button', {type:'button', 'aria-label': t('design.fit'), onclick: function(){ view = {x:0, y:0, w:1000, h:700}; setView(); }}, '⤢'));
+    var card = el('div', {class:'card canvas-card'}, tools);
+    card.appendChild(svg);
+    return card;
+  }
+
+  function editor(b, d){
+    var form = el('div', {class:'stack'});
+    var inputs = {};
+    var level = audience();
+    Object.keys(b.editable).forEach(function(path){
+      var kind = b.editable[path];
+      if (kind === 'name' && level !== 'developer') return;  // the slug is a developer's detail
+      if (kind === 'role' && level === 'ordinary') return;   // the system's choice, shown with its reason
+      var v = b.values[path], input;
+      if (kind === 'bool'){
+        input = el('input', {type:'checkbox'}); input.checked = !!v;
+      } else if (kind === 'money'){
+        input = el('input', {type:'number', min:'0.01', step:'0.01', dir:'ltr'}); input.value = v;
+      } else if (kind === 'role' || kind === 'gate' || kind === 'classification'){
+        input = el('select', {});
+        var options = kind === 'role' ? MODEL_ROLES : (kind === 'gate' ? d.gates_allowed : ['public','internal','sensitive']);
+        options.forEach(function(o){ input.appendChild(el('option', {value:o}, lbl(kind === 'role' ? 'role' : 'dchoice', o))); });
+        input.value = v;
+      } else if (kind === 'sources' || kind === 'tools'){
+        input = el('div', {class:'row', role:'group'});
+        (kind === 'sources' ? ['task.input','memory.phase_current','skills'] : ['web_search','repo_read','repo_write','terminal','deploy']).forEach(function(o){
+          var cb = el('input', {type:'checkbox', value:o}); cb.checked = (v || []).indexOf(o) >= 0;
+          input.appendChild(el('label', {class:'row'}, cb, lbl('dchoice', o)));
+        });
+      } else {
+        input = el('textarea', {rows: kind === 'text' ? '3' : '2', dir:'auto'});
+        input.value = Array.isArray(v) ? v.join(t('list.sep')) : (v || '');
+      }
+      inputs[path] = {kind: kind, input: input};
+      form.appendChild(el('label', {class:'f'}, lbl('dfield', path), input));
+    });
+    if (!Object.keys(inputs).length) return null;
+    var status = el('p', {class:'err muted', role:'status'});
+    var save = el('button', {class:'btn sm', text: t('common.save')});
+    save.addEventListener('click', function(){
+      var changes = {};
+      Object.keys(inputs).forEach(function(path){
+        var it = inputs[path], value;
+        if (it.kind === 'bool') value = it.input.checked;
+        else if (it.kind === 'money') value = Number(it.input.value);
+        else if (it.kind === 'sources' || it.kind === 'tools') value = Array.prototype.filter.call(it.input.querySelectorAll('input'), function(c){ return c.checked; }).map(function(c){ return c.value; });
+        else value = it.input.value;
+        if (JSON.stringify(value) !== JSON.stringify(b.values[path])) changes[path] = value;
+      });
+      if (!Object.keys(changes).length){ status.textContent = t('design.nothing_changed'); return; }
+      send('/design/edit', {branch: b.key, changes: changes}, status);
+    });
+    form.appendChild(el('div', {class:'btn-row'}, save));
+    form.appendChild(status);
+    return el('details', {class:'advanced'}, el('summary', {text: t('build.edit')}), form);
+  }
+
+  function branchPanel(b, d){
+    var panel = el('div', {class:'card stack branch-panel', 'aria-live':'polite'});
+    panel.appendChild(el('h3', {}, statusIcon(b.status) + ' ' + lbl('branch', b.key)));
+    panel.appendChild(el('p', {class:'chip dstatus', text: lbl('dstatus', b.status) + ' · ' + lbl('dsource', b.source)}));
+    panel.appendChild(el('p', {class:'muted', text: t('branch_help.' + b.key)}));
+    Object.keys(b.values).forEach(function(path){
+      if (path === 'agent_core.name' && audience() !== 'developer') return;  // a developer's detail
+      panel.appendChild(el('div', {class:'brief-row'}, el('b', {text: lbl('dfield', path)}), el('p', {dir:'auto', text: fmtValue(b.values[path])})));
+    });
+    b.issues.forEach(function(i){ panel.appendChild(el('p', {class:'err muted', dir:'ltr', text: '⚠ ' + i})); });
+    if (showCode()) panel.appendChild(el('p', {class:'muted', dir:'ltr', text: t('design.sections') + ': ' + b.sections.join(', ')}));
+    var ed = editor(b, d);
+    if (ed) panel.appendChild(ed);
+    var status = el('p', {class:'err muted', role:'status'});
+    if (b.status !== 'confirmed'){
+      var ok = el('button', {class:'btn sm', text: t('design.confirm_branch'), disabled: b.status === 'incomplete' ? 'disabled' : null});
+      ok.addEventListener('click', function(){
+        ok.disabled = true;
+        selectedBranch = null;  // after a confirmation the next unconfirmed branch opens (progressive, one at a time)
+        send('/design/confirm', {branch: b.key, blueprint_version: d.version}, status);
+      });
+      panel.appendChild(el('div', {class:'btn-row'}, ok));
+    }
+    panel.appendChild(status);
+    return panel;
+  }
+
+  function designSection(d){
+    var wrap = el('div', {class:'stack'});
+    wrap.appendChild(el('h3', {text: t('design.title')}));
+    if (!selectedBranch){
+      var next = d.branches.filter(function(b){ return b.status !== 'confirmed'; })[0];
+      selectedBranch = next ? next.key : d.branches[0].key;
+    }
+    var sel = d.branches.filter(function(b){ return b.key === selectedBranch; })[0] || d.branches[0];
+    var narrow = window.matchMedia && window.matchMedia('(max-width: 899px)').matches;
+    if (narrow){
+      // Phones: the branches as a step list, the selected one opened in place; no dragging needed.
+      var list = el('div', {class:'list branch-list'});
+      d.branches.forEach(function(b){
+        list.appendChild(el('button', {class:'list-item', 'aria-expanded': String(b.key === sel.key), onclick: function(){ selectedBranch = b.key; draw(st); }},
+          el('div', {class:'top'}, el('b', {text: statusIcon(b.status) + ' ' + lbl('branch', b.key)}), el('span', {class:'chip', text: lbl('dstatus', b.status)}))));
+        if (b.key === sel.key) list.appendChild(branchPanel(b, d));
+      });
+      wrap.appendChild(list);
+    } else {
+      wrap.appendChild(el('div', {class:'design-layout'}, canvas(d), branchPanel(sel, d)));
+    }
+    wrap.appendChild(designActions(d));
+    if (showCode()){
+      wrap.appendChild(el('details', {class:'advanced'}, el('summary', {text: 'blueprint v' + d.version + ' (JSON)'}),
+        el('pre', {class:'code', dir:'ltr', text: JSON.stringify(d.blueprint, null, 2)})));
+    }
+    return wrap;
+  }
+
   function draw(next){
     st = next;
     clear(body);
@@ -1477,11 +1688,12 @@ function renderBuild(root, id){
     if (st.session.stage === 'PAUSED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.paused_banner')}));
     if (st.session.stage === 'CANCELLED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.cancelled_banner')}));
     if (st.approval) body.appendChild(el('p', {class:'chip status-COMPLETED', text: t('build.approved', {version: fmtNum(st.approval.version), time: fmtTime(st.approval.decided_at)})}));
-    if (st.session.stage === 'DESIGNING') body.appendChild(el('p', {class:'muted', text: t('build.next_design')}));
+    if (st.session.stage === 'BUILDING') body.appendChild(el('p', {class:'muted', text: t('design.next_build')}));
     if (st.question){
       body.appendChild(el('p', {class:'muted', text: t('build.progress', {answered: fmtNum(st.progress.answered), total: fmtNum(st.progress.total)})}));
       body.appendChild(questionCard(st.question));
     }
+    if (st.design) body.appendChild(designSection(st.design));
     body.appendChild(summaryCard());
     body.appendChild(actions());
   }
@@ -1793,7 +2005,12 @@ function preferencesCard(){
 
     card.appendChild(el('h3', {text: t('prefs.title')}));
     card.appendChild(el('p', {class:'muted', text: t('prefs.sub')}));
+    var theme = el('select', {id:'pref-theme'});
+    ['light', 'dark'].forEach(function(v){ theme.appendChild(el('option', {value: v}, lbl('theme', v))); });
+    theme.value = I18N.theme();
+    theme.addEventListener('change', function(){ I18N.setTheme(theme.value); });
     card.appendChild(el('div', {class:'grid grid-3'},
+      el('label', {class:'f'}, t('prefs.theme'), theme),
       el('label', {class:'f'}, t('prefs.language'), lang),
       el('label', {class:'f'}, t('prefs.level'), level),
       el('label', {class:'f'}, t('prefs.code'), code)));

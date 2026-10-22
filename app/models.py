@@ -353,6 +353,10 @@ class ModelCall(Base):
     # Indexed: every paid call sums its project's and task's logged cost while it holds the project's queue.
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
+    # A call made for building an agent (app/design.py), counted against that build's own budget.
+    factory_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("factory_sessions.id", ondelete="SET NULL"), index=True
+    )
     agent: Mapped[str | None] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(50))
     provider: Mapped[str] = mapped_column(String(50))
@@ -381,6 +385,9 @@ class BudgetHold(Base):
     # Like ModelCall.task_id: a task deleted mid-call (a rejected plan's) must not take the hold, and with it the
     # project's in-flight spend, along; the hold keeps counting against the project until the call finishes.
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
+    factory_session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True
+    )
     usd: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -419,6 +426,9 @@ class FactorySession(Base):
     locale: Mapped[str] = mapped_column(String(8))
     interaction_policy: Mapped[str] = mapped_column(String(30))
     quality_target: Mapped[str] = mapped_column(String(30))
+    # The most the model may cost while building this agent (assisted design, app/design.py); every paid call is
+    # held against it before it runs, like a project's budget (app/gateway/service.py).
+    budget_usd: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -467,4 +477,25 @@ class FactoryRequest(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     request_id: Mapped[str] = mapped_column(String(64))
     session_id: Mapped[int | None] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class BlueprintRevision(Base):
+    """An immutable version of the agent's design (docs/AGENT_BLUEPRINT.md, 14 sections), made from one approved brief
+    version (app/design.py). `branches` holds each canvas branch's status — proposed / confirmed — and where a value
+    came from; `issues` is the deterministic validator's verdict on exactly this version."""
+
+    __tablename__ = "blueprint_revisions"
+    __table_args__ = (UniqueConstraint("session_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("factory_sessions.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    brief_version: Mapped[int] = mapped_column(Integer)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    blueprint: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    branches: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    issues: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reason: Mapped[str] = mapped_column(String(40))  # drafted | assisted | edited | branch_confirmed | reverted
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
