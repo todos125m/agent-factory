@@ -1,14 +1,15 @@
 from typing import Any, Callable, TypeVar
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import chat, manager, storable
+from app import chat, manager, runtime, storable
 from app.auth import current_user
-from app.models import User
+from app.models import Run, User
 from app.db import get_session
-from app.errors import AppError, refused
+from app.errors import AppError, not_found, refused
 from app.gateway.providers import ProviderError
 from app.gateway.service import BudgetExceeded, Gateway
 from app.manager import ManagerError
@@ -98,6 +99,14 @@ def run_task(
     return _run(manager.run_task, session, gateway, project, task)
 
 
+@router.post("/tasks/{tid}/unblock", response_model=TaskRunResultOut)
+def unblock(project_id: int, tid: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    """A BLOCKED task once its specialist is registered: CREATED again (READY when its dependencies allow)."""
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
+    return _run(manager.unblock, session, project, task)
+
+
 @router.post("/chat", response_model=ChatTurnOut)
 def send_chat(
     project_id: int, body: ChatIn, session: Session = Depends(get_session), me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)
@@ -110,3 +119,60 @@ def send_chat(
 def list_chat(project_id: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
     project = load_project(session, project_id, me)
     return chat.list_messages(session, project)
+
+
+# ---------- bounded runs (app/runtime.py) ----------
+
+
+class RespondIn(storable.StorableIn):
+    text: str | None = Field(default=None, max_length=4000)
+    approve: bool | None = None
+    happened: bool | None = None
+
+
+@router.post("/tasks/{tid}/runs", status_code=201)
+def start_run(project_id: int, tid: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    """Queue a bounded, step-by-step run of a RUNNING task; a worker executes it (poll GET .../runs/{id})."""
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
+    manager.ensure_active(session, project, "run", task.id)
+    return runtime.view(session, runtime.start(session, project, task, me))
+
+
+@router.get("/tasks/{tid}/runs")
+def list_runs(project_id: int, tid: int, session: Session = Depends(get_session), me: User = Depends(current_user)):
+    load_task(session, project_id, tid, me)
+    return [runtime.view(session, r) for r in session.scalars(
+        select(Run).where(Run.task_id == tid).order_by(Run.id.desc()).limit(10))]
+
+
+def _load_run(session: Session, project_id: int, tid: int, rid: int, me: User) -> tuple:
+    project = load_project(session, project_id, me)
+    task = load_task(session, project_id, tid, me)
+    run = session.get(Run, rid)
+    if run is None or run.task_id != task.id:
+        raise not_found("run")
+    return project, task, run
+
+
+@router.get("/tasks/{tid}/runs/{rid}")
+def get_run(project_id: int, tid: int, rid: int, session: Session = Depends(get_session),
+            me: User = Depends(current_user)):
+    return runtime.view(session, _load_run(session, project_id, tid, rid, me)[2])
+
+
+@router.post("/tasks/{tid}/runs/{rid}/respond")
+def respond_run(project_id: int, tid: int, rid: int, body: RespondIn, session: Session = Depends(get_session),
+                me: User = Depends(current_user)):
+    """The owner's answer to what the run waits on: a question (text), a tool action (approve), an unknown outcome
+    (happened). The same run then continues."""
+    project, task, run = _load_run(session, project_id, tid, rid, me)
+    return runtime.view(session, runtime.respond(session, project, task, run, me, text=body.text,
+                                                 approve=body.approve, happened=body.happened))
+
+
+@router.post("/tasks/{tid}/runs/{rid}/cancel")
+def cancel_run(project_id: int, tid: int, rid: int, session: Session = Depends(get_session),
+               me: User = Depends(current_user)):
+    project, task, run = _load_run(session, project_id, tid, rid, me)
+    return runtime.view(session, runtime.cancel(session, project, task, run, me))

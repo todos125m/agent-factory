@@ -52,7 +52,7 @@ GATES_FOR_POLICY = {"step_by_step": ["always"], "milestone": ["checkpoint", "alw
 DEFAULT_GATE = {"step_by_step": "always", "milestone": "checkpoint", "delegated_bounded": "checkpoint"}
 ALLOWED_SOURCES = ["task.input", "memory.phase_current", "skills"]
 TOOL_PERMISSION = {"web_search": "network", "repo_write": "repo_write", "deploy": "deploy", "terminal": "repo_write",
-                   "repo_read": None}
+                   "repo_read": None, "memory_search": None}
 TECH_STACK = "Python 3.11, FastAPI, SQLAlchemy 2, Pydantic 2, app/gateway"
 
 # What an owner may change, by branch: path -> kind. Anything else is the system's (shown, not editable).

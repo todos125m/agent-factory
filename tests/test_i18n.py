@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app import runtime
 from app.design import ALLOWED_SOURCES, BRANCHES, EDITABLE
 from app.factory import field_specs
 from app.registry import KNOWN_TOOLS
@@ -90,8 +91,14 @@ LABELLED = {
     "effort": ["low", "medium", "high"],
     "depth": ["quick", "standard", "deep"],
     "evidence": ["FACT", "INFERENCE", "HYPOTHESIS"],
-    "inbox.kind": ["plan", "checkpoint", "ready"],
-    "inbox.head": ["plan", "checkpoint", "ready"],
+    "inbox.kind": ["plan", "checkpoint", "ready", "blocked", "waiting"],
+    "inbox.head": ["plan", "checkpoint", "ready", "blocked", "waiting"],
+    "treason": [*sorted(runtime.STOP_REASONS), *sorted(runtime.WAITING_REASONS.values())],
+    "rstate": sorted(runtime.RUN_STATES),
+    "rstep": sorted(runtime.STEP_KINDS),
+    "raction": ["finish", "tool", "ask_user"],
+    "rrefused": sorted(runtime.REFUSALS),
+    "tstate": sorted(runtime.EXECUTION_STATES),
     "policy": list(INTERACTION_POLICIES),
     "quality": list(QUALITY_TARGETS),
     "outloc": list(OUTPUT_LOCALES),

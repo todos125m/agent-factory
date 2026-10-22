@@ -57,6 +57,8 @@ class TaskStatus(str, enum.Enum):
     FAILED = "FAILED"
     ESCALATED = "ESCALATED"
     CANCELLED = "CANCELLED"
+    # Kept in the graph, with every dependency, but unable to start: its specialist doesn't exist (`Task.reason`).
+    BLOCKED = "BLOCKED"
 
 
 class User(Base):
@@ -161,6 +163,9 @@ class Task(Base):
     mode: Mapped[Mode | None] = mapped_column(Enum(Mode))  # None = inherit from project
     retries: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    # Why it is BLOCKED or WAITING (or why its run stopped): a code, not prose — missing_specialist, waiting_user,
+    # tool_approval, reconcile, step_limit, time_limit, budget_exhausted, model_failed, schema_mismatch, run_cancelled.
+    reason: Mapped[str | None] = mapped_column(String(60))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -499,3 +504,68 @@ class BlueprintRevision(Base):
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     reason: Mapped[str] = mapped_column(String(40))  # drafted | assisted | edited | branch_confirmed | reverted
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Run(Base):
+    """One bounded execution of a RUNNING task by its agent (app/runtime.py): the snapshot of everything it may do —
+    limits, policy, permissions, tools — fixed when it starts, then its counters. A worker holds it by a lease that it
+    renews each step; a lease that ran out means the worker stopped, and another one recovers the run."""
+
+    __tablename__ = "runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    agent: Mapped[str] = mapped_column(String(100))
+    agent_version: Mapped[int] = mapped_column(Integer)
+    model_role: Mapped[str] = mapped_column(String(50))
+    # queued|running|waiting|completed|stopped ("state", not "status": only a Task has a status)
+    state: Mapped[str] = mapped_column(String(20), default="queued")
+    reason: Mapped[str | None] = mapped_column(String(60))
+    limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    policy: Mapped[str] = mapped_column(String(30))
+    permissions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    tools: Mapped[list[str]] = mapped_column(JSON, default=list)
+    pending: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # what it waits on: a question, a tool approval
+    steps_used: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    lease_owner: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RunStep(Base):
+    """One step of a run, as it happened: the model's proposal, a tool's observation, a question and its answer."""
+
+    __tablename__ = "run_steps"
+    __table_args__ = (UniqueConstraint("run_id", "n"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    n: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(20))  # proposal|observation|question|answer|approval|stop|finish
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ToolExecution(Base):
+    """A tool a run used (app/runtime.py Tool Gateway). Written `started` before the tool runs and `succeeded` /
+    `failed` after it: a run recovered with one still `started` never runs it again — it becomes `unknown` and the
+    owner says what happened (there is no general exactly-once; `idempotency_key` makes a retried step a no-op)."""
+
+    __tablename__ = "tool_executions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    step_n: Mapped[int] = mapped_column(Integer)
+    tool: Mapped[str] = mapped_column(String(50))
+    input_digest: Mapped[str] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True)
+    state: Mapped[str] = mapped_column(String(20))  # started|succeeded|failed|unknown (a refusal runs nothing)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

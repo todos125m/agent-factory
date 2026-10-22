@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import Integer, select
 
 import app as app_package
+from app import runtime
 from app.chat import ChatReplyOut
 from app.db import Base, varchar_length
 from app.gateway.providers import FakeProvider
@@ -110,6 +111,7 @@ MODEL = {
 DERIVED = {
     ("memory_items", "title"): ("tasks", "title"),
     ("learning_traces", "concept"): ("tasks", "title"),
+    ("runs", "agent"): ("agents", "name"),  # the run's snapshot of its agent (app/runtime.py::start)
 }
 
 # Written from files in registry/ at startup: a longer value is a RegistryError naming the file, not a database error.
@@ -138,6 +140,19 @@ CLOSED = {
     ("blueprint_revisions", "reason"): lambda: {"drafted", "assisted", "edited", "branch_confirmed", "reverted"},
     ("auth_sessions", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest (app/auth.py::_digest)
     ("login_codes", "code_hash"): lambda: {"f" * 64},
+    # app/runtime.py names each of its closed sets once
+    ("runs", "model_role"): lambda: MODEL_ROLES,  # the agent's, which AgentSpec bounds
+    ("runs", "state"): lambda: runtime.RUN_STATES,
+    ("runs", "reason"): lambda: runtime.STOP_REASONS | set(runtime.WAITING_REASONS.values()),
+    ("runs", "policy"): lambda: set(INTERACTION_POLICIES),
+    ("runs", "lease_owner"): lambda: {f"{'9' * 10}-{'9' * 4}-{'f' * 8}"},  # app/worker.py: pid-index-hex8
+    ("run_steps", "kind"): lambda: runtime.STEP_KINDS,
+    ("tool_executions", "tool"): lambda: set(runtime.TOOLS),  # only an implemented tool runs (_propose_tool)
+    ("tool_executions", "input_digest"): lambda: {"f" * 64},
+    ("tool_executions", "idempotency_key"): lambda: {
+        f"run{'9' * 10}:step{'9' * 10}:{max(runtime.TOOLS, key=len)}:{'f' * 16}"},
+    ("tool_executions", "state"): lambda: runtime.EXECUTION_STATES,
+    ("tasks", "reason"): lambda: runtime.STOP_REASONS | set(runtime.WAITING_REASONS.values()),
 }
 
 CODE = {("run_events", "type")}  # the literal passed to record_event: test_every_event_type_fits_its_column
@@ -338,6 +353,8 @@ def test_every_integer_column_is_accounted_for():
         ("factory_sessions", "revision"), ("brief_revisions", "version"), ("approvals", "resource_version"),
         ("blueprint_revisions", "version"), ("blueprint_revisions", "brief_version"),
         ("blueprint_revisions", "schema_version"),
+        ("runs", "agent_version"), ("runs", "steps_used"), ("runs", "tool_calls"), ("runs", "failures"),  # <= limits
+        ("run_steps", "n"), ("tool_executions", "step_n"),
     }
     integers = {
         (table.name, column.name)

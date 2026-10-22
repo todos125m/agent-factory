@@ -59,6 +59,7 @@ def test_plan_creates_the_dag(client, session_factory, project):
 
 
 def test_unknown_agent_becomes_specialist_request(client, session_factory, project):
+    """The step stays in the graph, BLOCKED (issue #2 G7; tests/test_runtime.py has its edges)."""
     pid = project["id"]
     plan = {
         "understanding": "u", "assumptions": [],
@@ -69,12 +70,14 @@ def test_unknown_agent_becomes_specialist_request(client, session_factory, proje
     r = client.post(f"/projects/{pid}/plan")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["task_ids"] == []
+    assert len(body["task_ids"]) == 1
     assert body["specialists_requested"] == ["designer"]
-    assert client.get(f"/projects/{pid}/tasks").json() == []
+    [task] = client.get(f"/projects/{pid}/tasks").json()
+    assert (task["status"], task["reason"], task["owner"]) == ("BLOCKED", "missing_specialist", "designer")
 
     events = client.get(f"/projects/{pid}/events").json()
-    assert any(e["type"] == "specialist.requested" and e["payload"]["agent"] == "designer" for e in events)
+    assert any(e["type"] == "specialist.requested" and e["payload"]["agent"] == "designer"
+               and e["task_id"] == task["id"] for e in events)
 
     app.dependency_overrides.pop(get_gateway, None)
 

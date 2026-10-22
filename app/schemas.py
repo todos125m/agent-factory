@@ -136,6 +136,7 @@ class TaskOut(ORM):
     mode: Mode | None
     retries: int
     max_retries: int
+    reason: str | None = None
     depends_on: list[int]
     created_at: datetime
     updated_at: datetime
@@ -336,7 +337,7 @@ class FeedbackOut(ORM):
 
 
 class InboxItem(BaseModel):
-    kind: str  # "plan" | "checkpoint" | "ready" (a READY task with no checkpoint yet)
+    kind: str  # "plan" | "checkpoint" | "ready" (a READY task with no checkpoint yet) | "blocked" (no specialist) | "waiting" (a run)
     project_id: int
     project_title: str
     task_id: int | None = None

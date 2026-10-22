@@ -8,7 +8,10 @@ from app.models import ProjectStage, TaskStatus
 S = TaskStatus
 
 TASK_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    S.CREATED: {S.READY, S.CANCELLED},
+    S.CREATED: {S.READY, S.CANCELLED, S.BLOCKED},
+    # A task whose specialist doesn't exist stays in the graph; once one does, it is CREATED again (then READY when
+    # its dependencies are done). Its dependents can't start meanwhile: BLOCKED is not done.
+    S.BLOCKED: {S.CREATED, S.CANCELLED},
     S.READY: {S.RUNNING, S.CANCELLED},
     S.RUNNING: {S.WAITING, S.COMPLETED, S.FAILED},
     S.WAITING: {S.RUNNING, S.FAILED, S.CANCELLED},
