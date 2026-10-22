@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import runtime
+from app import build, runtime
 from app.design import ALLOWED_SOURCES, BRANCHES, EDITABLE
 from app.factory import field_specs
 from app.registry import KNOWN_TOOLS
@@ -99,6 +99,8 @@ LABELLED = {
     "raction": ["finish", "tool", "ask_user"],
     "rrefused": sorted(runtime.REFUSALS),
     "tstate": sorted(runtime.EXECUTION_STATES),
+    "vstate": sorted(build.VERSION_STATES),
+    "verdict": sorted(build.VERDICTS),
     "policy": list(INTERACTION_POLICIES),
     "quality": list(QUALITY_TARGETS),
     "outloc": list(OUTPUT_LOCALES),

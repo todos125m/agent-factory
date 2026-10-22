@@ -12,11 +12,11 @@
 | G3 ✅ PR2 | پرونده‌ی brief نسخه‌دار با `value/status/source_ref/revision` | ندارد؛ پاسخ‌ها فقط در مرورگر (PR1: `sessionStorage` همان تب) | refresh/دستگاه دیگر = از دست رفتن؛ داده‌ی حدسی و تأییدشده جدا نیستند | ۲ |
 | G4 ✅ PR2 (brief) | تأیید نسخه‌دار، idempotent، رد پاسخ دیررس | تأیید برنامه و تصمیم checkpoint فقط RunEventهای `decision.*` هستند، بدون نسخه، actor، scope یا `request_id` (`app/manager.py::approve_plan/_decide`). reject همزمان با یک قفل پروژه محافظت شده (موجود و خوب) | double-submit و تأیید نسخه‌ی قدیمی قابل تشخیص نیست | ۲ |
 | G5 ✅ PR3 | Blueprint پیش‌نویس، validation، تأیید طرح | validator قطعی موجود است (`app/blueprint.py`، ۱۱ بخش کد + ۳ بخش ضمنی سند)؛ Blueprint **ذخیره نمی‌شود** و تأیید ندارد | طرح قابل بازبینی/نسخه‌بندی نیست | ۳ |
-| G6 | فعال‌سازی فقط بعد از ارزیابی PASS و تأیید نهایی؛ rollback | `POST /agents` ایجنت را **بلافاصله فعال** ثبت می‌کند (`Agent.active` پیش‌فرض true، `app/routers/agents.py::register_agent`)؛ `Agent.version` عدد است بدون تاریخچه | نقض «بدون evaluation PASS activation ممنوع» و §12/§13 خود ARCHITECTURE | ۵ |
+| G6 ✅ PR5 | فعال‌سازی فقط بعد از ارزیابی PASS و تأیید نهایی؛ rollback | `POST /agents` ایجنت را **بلافاصله فعال** ثبت می‌کند (`Agent.active` پیش‌فرض true، `app/routers/agents.py::register_agent`)؛ `Agent.version` عدد است بدون تاریخچه | نقض «بدون evaluation PASS activation ممنوع» و §12/§13 خود ARCHITECTURE | ۵ |
 | G7 ✅ PR4 | متخصص ناموجود: Task و همه‌ی وابستگی‌ها در DAG بمانند و BLOCKED شوند | `_add_plan` گامِ دارای ایجنت ناموجود را **حذف می‌کند و یال وابستگی به آن را هم دور می‌ریزد** (`app/manager.py::_add_plan`: `deps = {task_ids[d] … if task_ids[d] is not None}`)؛ فقط `specialist.requested` ثبت می‌شود | **باگ:** گام پایین‌دستی بدون پیش‌نیازش READY و اجرا می‌شود | ۴ |
 | G8 ✅ PR4 | WAITING با reason؛ BLOCKED / WAITING_SPECIALIST | `TaskStatus` وضعیت BLOCKED ندارد؛ reason فقط در payload رویداد است، نه روی Task (`app/models.py::TaskStatus`) | نیاز به ستون/وضعیت جدید → نیاز به مهاجرت | ۴ |
 | G9 ✅ PR4 | runtime محدود: step loop، RunSnapshot، lease/heartbeat، تکرار نکردن اثر | هر اجرای task یک فراخوانی همزمان داخل درخواست HTTP است (`run_task`)؛ worker، lease، snapshot و ToolExecution ندارد؛ ابزار فقط `web_search` سمت سرور ارائه‌دهنده | بدون سقف step و بدون بازیابی crash | ۴ |
-| G10 | Builder و Reviewer/Evaluator، موارد عادی/مرزی/شکست | ساخته نشده (فاز ۶ README خالی)؛ `BenchmarkRun` فقط مسیر مدل‌ها را مقایسه می‌کند | «JSON معتبر با نتیجه‌ی ناموفق» امروز تشخیص داده نمی‌شود | ۵ |
+| G10 ✅ PR5 | Builder و Reviewer/Evaluator، موارد عادی/مرزی/شکست | ساخته نشده (فاز ۶ README خالی)؛ `BenchmarkRun` فقط مسیر مدل‌ها را مقایسه می‌کند | «JSON معتبر با نتیجه‌ی ناموفق» امروز تشخیص داده نمی‌شود | ۵ |
 | G11 | بوم workflow، typed edges، credential_ref | ندارد؛ کلیدها فقط متغیر محیطی سراسری‌اند | | ۶ |
 | G12 | API بیرونی با scope، quota، نسخه‌ی pinned | ندارد | | ۷ |
 | G13 ✅ PR2a | مهاجرت قابل تکرار SQLite/PostgreSQL | `create_all` + `ensure_indexes` + `ensure_column_lengths` (`app/db.py`): جدول و ایندکس جدید و عریض‌کردن؛ **افزودن ستون به جدول موجود ممکن نیست** | G8/G6 بدون مهاجرت قابل انجام نیستند | تصمیم قبل از ۲ |
@@ -37,7 +37,7 @@
 | ۲ | session پایدار، brief نسخه‌دار، تأیید، مصاحبه‌ی تطبیقی (G2–G4، G15) | سؤال مرتبط؛ refresh/resume؛ رد پاسخ قدیمی و double submit | **انجام شد** (برچسب رویدادها G15: هنوز) |
 | ۳ | طراحی Blueprint و نمای شاخه‌ای (G5، G16) | ۱۴ بخش validate؛ تأیید/ویرایش؛ نگاشت UI واقعی بدون مجوز ضمنی | **انجام شد** (G16 توضیح سه‌زبانه‌ی ایجنت‌های registry: هنوز) |
 | ۴ | DAG متخصص ناموجود و runtime محدود یک نقش (G7–G9) | وابستگی حفظ؛ action/observation؛ سقف هزینه و توقف قابل اثبات | **انجام شد** (ابزار پیاده‌شده: فقط `memory_search`؛ بقیه رد با `tool_unavailable` تا PR6) |
-| ۵ | Builder/Evaluator محدود و activation نسخه‌دار (G6، G10) | PASS واقعی و تأیید نهایی؛ اصلاح bounded؛ rollback | |
+| ۵ | Builder/Evaluator محدود و activation نسخه‌دار (G6، G10) | PASS واقعی و تأیید نهایی؛ اصلاح bounded؛ rollback | **انجام شد** (d36 داور مدل، d37 مسیر مستقیم ادمین می‌ماند، d38 سقف ۳ دور) |
 | ۶ | workflow typed edges و اتصال provider/tool (G11) | ناسازگاری/چرخه/مالکیت رد؛ Save جدا از Run؛ credentials امن | |
 | ۷ | API بیرونی در صورت آمادگی (G12) | scope، quota، version pin، checkpoint؛ در غیر این صورت «در دسترس نیست» | |
 

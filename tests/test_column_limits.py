@@ -23,7 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import Integer, select
 
 import app as app_package
-from app import runtime
+from app import build, runtime
 from app.chat import ChatReplyOut
 from app.db import Base, varchar_length
 from app.gateway.providers import FakeProvider
@@ -111,7 +111,8 @@ MODEL = {
 DERIVED = {
     ("memory_items", "title"): ("tasks", "title"),
     ("learning_traces", "concept"): ("tasks", "title"),
-    ("runs", "agent"): ("agents", "name"),  # the run's snapshot of its agent (app/runtime.py::start)
+    ("runs", "agent"): ("agents", "name"),
+    ("agent_versions", "agent_name"): ("agents", "name"),  # the design's agent_core.name, the registry's pattern  # the run's snapshot of its agent (app/runtime.py::start)
 }
 
 # Written from files in registry/ at startup: a longer value is a RegistryError naming the file, not a database error.
@@ -135,8 +136,9 @@ CLOSED = {
     ("factory_sessions", "interaction_policy"): lambda: set(INTERACTION_POLICIES),
     ("factory_sessions", "quality_target"): lambda: set(QUALITY_TARGETS),
     ("approvals", "stage"): lambda: {s.value for s in FactoryStage},
-    ("approvals", "resource"): lambda: {"brief", "blueprint"},
-    ("approvals", "invalidated_reason"): lambda: {"brief_changed", "changes_requested", "design_changed"},
+    ("approvals", "resource"): lambda: {"brief", "blueprint", "agent_version"},
+    ("approvals", "invalidated_reason"): lambda: {"brief_changed", "changes_requested", "design_changed",
+                                                  "evaluation_failed"},
     ("blueprint_revisions", "reason"): lambda: {"drafted", "assisted", "edited", "branch_confirmed", "reverted"},
     ("auth_sessions", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest (app/auth.py::_digest)
     ("login_codes", "code_hash"): lambda: {"f" * 64},
@@ -152,6 +154,8 @@ CLOSED = {
     ("tool_executions", "idempotency_key"): lambda: {
         f"run{'9' * 10}:step{'9' * 10}:{max(runtime.TOOLS, key=len)}:{'f' * 16}"},
     ("tool_executions", "state"): lambda: runtime.EXECUTION_STATES,
+    ("agent_versions", "state"): lambda: build.VERSION_STATES,
+    ("evaluations", "verdict"): lambda: build.VERDICTS,
     ("tasks", "reason"): lambda: runtime.STOP_REASONS | set(runtime.WAITING_REASONS.values()),
 }
 
@@ -355,6 +359,7 @@ def test_every_integer_column_is_accounted_for():
         ("blueprint_revisions", "schema_version"),
         ("runs", "agent_version"), ("runs", "steps_used"), ("runs", "tool_calls"), ("runs", "failures"),  # <= limits
         ("run_steps", "n"), ("tool_executions", "step_n"),
+        ("agent_versions", "version"), ("agent_versions", "blueprint_version"), ("evaluations", "round"),
     }
     integers = {
         (table.name, column.name)
