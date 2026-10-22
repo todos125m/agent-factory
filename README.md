@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
+| Human-guided factory (Issue #2) | PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR2–PR7 pending | 🟡 PR1 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -224,6 +224,29 @@ click applies once). Pause / resume / cancel; every change is a RunEvent with it
 | POST | `/factory/sessions/{id}/answer` | `{field, value | dont_know, expected_revision, request_id}` |
 | POST | `/factory/sessions/{id}/approve` | `{brief_version, expected_revision, request_id}` |
 | POST | `/factory/sessions/{id}/request-changes`, `/pause`, `/cancel` | |
+
+### Designing the agent (issue #2 PR3)
+
+Approving the brief draws the agent's 14-section Blueprint from it, deterministically and free (`app/design.py`): what an
+ordinary owner isn't asked (model role, storage, deployment, what is recorded) is filled by the system per the standard.
+The build page shows it as a canvas — the goal in the centre, eight branches (identity, I/O & actions, knowledge,
+tools, memory, model, interaction & permissions, evaluation) covering all 14 sections — each proposed, confirmed or
+incomplete (icon + text, not colour alone); on a phone, a step list. Each branch can be edited (a new immutable
+`BlueprintRevision`, the branch back to proposed), confirmed (only without issues), or undone to an earlier version.
+Every permission starts off; a tool needs its permission; the approval gate can't be looser than the build's
+interaction policy. "Improve with AI" is the only model call of a build, made only on request (role `cheap`, schema-
+validated) and held against the build's own budget (`FactorySession.budget_usd`, from `budget.task_usd`; 402 when over;
+`ModelCall.factory_session_id`); its values come back as proposals. Approving the design binds to one exact version made
+from the currently approved brief and moves the build to BUILDING (PR5). The UI's default look is theme A (light,
+`#F8FAFC` / `#172033` / `#14B8A6`); the earlier dark theme is a choice in Settings.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/factory/sessions/{id}/design/edit` | `{branch, changes: {path: value}, expected_revision, request_id}` |
+| POST | `/factory/sessions/{id}/design/confirm` | `{branch, blueprint_version, …}` |
+| POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
+| POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
+| POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
 
 ### Sign-in and access (owner decision d33)
 

@@ -40,7 +40,9 @@ BRIEF_FILE = Path(__file__).resolve().parent.parent / "registry" / "factory" / "
 MAX_ANSWER_CHARS = 4000
 S = FactoryStage
 # A stage in which the brief can still change by answering (a change after approval reopens it).
-EDITABLE = {S.DRAFT, S.CLARIFYING, S.AWAITING_BRIEF_APPROVAL, S.DESIGNING}
+EDITABLE = {S.DRAFT, S.CLARIFYING, S.AWAITING_BRIEF_APPROVAL, S.DESIGNING, S.AWAITING_DESIGN_APPROVAL, S.BUILDING}
+# The stages that follow an approved brief: a change of the brief invalidates every approval made after it.
+AFTER_BRIEF = {S.DESIGNING, S.AWAITING_DESIGN_APPROVAL, S.BUILDING}
 TERMINAL = {S.CANCELLED, S.ACTIVE}
 
 # Answers that say nothing: asked again, never taken as the owner's answer.
@@ -80,10 +82,13 @@ def _text(localized: dict[str, str] | None, locale: str) -> str | None:
 
 def load_session(db: Session, session_id: int, owner: User, *, lock: bool = False) -> FactorySession:
     """The owner's session; another account's is the same 404 as a missing one. `lock` serializes the changes to one
-    session (PostgreSQL row lock; SQLite's single write lock does the same once the first write happens)."""
+    session (PostgreSQL row lock; SQLite's single write lock does the same once the first write happens) and reads
+    the row fresh."""
     query = select(FactorySession).where(FactorySession.id == session_id)
     if lock:
-        query = query.with_for_update()
+        # populate_existing: a locked read is the database's, not this session's cached copy — after a model call the
+        # copy loaded before it would hide what another tab changed meanwhile.
+        query = query.with_for_update().execution_options(populate_existing=True)
     fs = db.scalar(query)
     if fs is None or fs.owner_id != owner.id:
         raise not_found("factory_session")
@@ -96,9 +101,10 @@ def current_brief(db: Session, fs: FactorySession) -> BriefRevision:
     )
 
 
-def active_approval(db: Session, fs: FactorySession) -> Approval | None:
+def active_approval(db: Session, fs: FactorySession, resource: str = "brief") -> Approval | None:
     return db.scalar(
-        select(Approval).where(Approval.session_id == fs.id, Approval.invalidated_at.is_(None))
+        select(Approval).where(Approval.session_id == fs.id, Approval.resource == resource,
+                               Approval.invalidated_at.is_(None))
         .order_by(Approval.id.desc()).limit(1)
     )
 
@@ -203,6 +209,8 @@ def create_session(db: Session, owner: User, *, title: str, locale: str, request
         interaction_policy=settings_layers.strictest(settings_layers.FACTORY_DEFAULT_POLICY,
                                                      resolved["max_interaction_policy"]),
         quality_target=resolved["quality_target"], stage=S.DRAFT.value, revision=1,
+        # What assisted design may cost (app/design.py::assist): one task's budget, from the settings layers.
+        budget_usd=float(resolved["budget"]["task_usd"]),
     )
     db.add(fs)
     db.flush()
@@ -256,9 +264,11 @@ def answer(db: Session, owner: User, session_id: int, *, field: str, value: str 
 
     was = S(fs.stage)
     invalidated = None
-    if was is S.DESIGNING and (approval := active_approval(db, fs)) is not None:
-        approval.invalidated_at, approval.invalidated_reason = utcnow(), "brief_changed"
-        invalidated = approval.id
+    if was in AFTER_BRIEF:
+        # The brief's approval and the design's made from it: both no longer hold (the design stays in history).
+        for approval in db.scalars(select(Approval).where(Approval.session_id == fs.id, Approval.invalidated_at.is_(None))):
+            approval.invalidated_at, approval.invalidated_reason = utcnow(), "brief_changed"
+            invalidated = approval.id
     complete = next_question(fields) is None
     _bump(fs, S.AWAITING_BRIEF_APPROVAL if complete else S.CLARIFYING)
     record_factory_event(db, fs.id, "factory.answered", owner.id, field=field, dont_know=dont_know,
@@ -293,6 +303,10 @@ def approve(db: Session, owner: User, session_id: int, *, brief_version: int, ex
     approved = _new_version(db, fs, confirmed, owner)
     db.add(Approval(session_id=fs.id, actor_id=owner.id, stage=S.AWAITING_BRIEF_APPROVAL.value, resource="brief",
                     resource_version=approved.version, scope=sorted(confirmed)))
+    from app import design  # local import: app.design builds on this module
+
+    db.flush()
+    design.draft(db, fs, approved.version, confirmed, owner)  # the first design of exactly this brief, free
     _bump(fs, S.DESIGNING)
     record_factory_event(db, fs.id, "factory.brief_approved", owner.id, brief_version=approved.version,
                          reviewed_version=brief_version)
@@ -411,9 +425,16 @@ def state(db: Session, fs: FactorySession, *, locale: str, level: str, duplicate
             "id": approval.id, "resource": approval.resource, "version": approval.resource_version,
             "actor_id": approval.actor_id, "decided_at": approval.decided_at,
         },
+        "design": _design_view(db, fs),
         "events": [{"type": e.type, "payload": e.payload, "created_at": e.created_at} for e in events],
         "duplicate": duplicate,
     }
+
+
+def _design_view(db: Session, fs: FactorySession) -> dict[str, Any] | None:
+    from app import design  # local import: app.design builds on this module
+
+    return design.view(db, fs) if S(fs.stage) in AFTER_BRIEF | {S.PAUSED, S.CANCELLED} else None
 
 
 def list_sessions(db: Session, owner: User) -> list[FactorySession]:

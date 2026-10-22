@@ -133,8 +133,9 @@ CLOSED = {
     ("factory_sessions", "interaction_policy"): lambda: set(INTERACTION_POLICIES),
     ("factory_sessions", "quality_target"): lambda: set(QUALITY_TARGETS),
     ("approvals", "stage"): lambda: {s.value for s in FactoryStage},
-    ("approvals", "resource"): lambda: {"brief"},
-    ("approvals", "invalidated_reason"): lambda: {"brief_changed", "changes_requested"},
+    ("approvals", "resource"): lambda: {"brief", "blueprint"},
+    ("approvals", "invalidated_reason"): lambda: {"brief_changed", "changes_requested", "design_changed"},
+    ("blueprint_revisions", "reason"): lambda: {"drafted", "assisted", "edited", "branch_confirmed", "reverted"},
     ("auth_sessions", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest (app/auth.py::_digest)
     ("login_codes", "code_hash"): lambda: {"f" * 64},
 }
@@ -335,6 +336,8 @@ def test_every_integer_column_is_accounted_for():
         ("model_calls", "input_tokens"), ("model_calls", "output_tokens"), ("model_calls", "cache_read_tokens"),
         ("model_calls", "cache_write_tokens"), ("model_calls", "web_searches"), ("model_calls", "duration_ms"),
         ("factory_sessions", "revision"), ("brief_revisions", "version"), ("approvals", "resource_version"),
+        ("blueprint_revisions", "version"), ("blueprint_revisions", "brief_version"),
+        ("blueprint_revisions", "schema_version"),
     }
     integers = {
         (table.name, column.name)

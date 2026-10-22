@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import settings_layers, storable
-from app.events import record_event
+from app.events import record_event, record_factory_event
 from app.gateway.pricing import cost_usd
 from app.gateway.providers import (
     MAX_CALL_S,
@@ -25,7 +25,7 @@ from app.gateway.providers import (
     WebSearchConfig,
     default_providers,
 )
-from app.models import BudgetHold, ModelCall, Task, utcnow
+from app.models import BudgetHold, FactorySession, ModelCall, Task, utcnow
 from app.pause import refuse_if_paused
 
 # Hard ceiling regardless of settings (owner's directive): a misconfigured or malicious settings
@@ -70,6 +70,17 @@ def held_usd(session: Session, *, project_id: int | None = None, task_id: int | 
     )
 
 
+def build_spent_usd(session: Session, factory_session_id: int) -> float:
+    """Cost logged so far for building one agent (app/design.py)."""
+    return float(session.scalar(select(func.coalesce(func.sum(ModelCall.cost_usd), 0.0))
+                                .where(ModelCall.factory_session_id == factory_session_id)) or 0.0)
+
+
+def build_held_usd(session: Session, factory_session_id: int) -> float:
+    return float(session.scalar(select(func.coalesce(func.sum(BudgetHold.usd), 0.0)).where(
+        BudgetHold.factory_session_id == factory_session_id, BudgetHold.created_at > utcnow() - HOLD_TTL)) or 0.0)
+
+
 class Gateway:
     def __init__(self, session: Session, providers: dict[str, Provider] | None = None) -> None:
         self.session = session
@@ -88,7 +99,9 @@ class Gateway:
         permissions: dict[str, Any] | None = None,
         json_schema: dict[str, Any] | None = None,
         route: dict[str, Any] | None = None,
+        factory_session_id: int | None = None,
     ) -> ModelResponse:
+        """`factory_session_id`: a call made for building an agent (no project): held against that build's budget."""
         if project_id is None and task_id is not None:
             # A task's call belongs to its project: pause check, settings, budget and ModelCall alike.
             task = self.session.get(Task, task_id)
@@ -135,12 +148,15 @@ class Gateway:
             # Estimated worst case for this call: all input uncached, all output tokens used. Web-search fees and
             # the tokens of search results are in neither this nor cost_usd, so a search call can cost more.
             estimate = cost_usd(route["model"], (len(system) + len(user)) // 3, max_out)
-            hold_id = self._hold_budget(project_id, task_id, budget, estimate, role=role, agent=agent)
+            if factory_session_id is not None:
+                hold_id = self._hold_build_budget(factory_session_id, estimate, role=role)
+            else:
+                hold_id = self._hold_budget(project_id, task_id, budget, estimate, role=role, agent=agent)
         # The hold, and anything the caller flushed, is committed now: nothing stays open while the model runs.
         self.session.commit()
         started = time.monotonic()
         call = ModelCall(
-            project_id=project_id, task_id=task_id, agent=agent, role=role,
+            project_id=project_id, task_id=task_id, factory_session_id=factory_session_id, agent=agent, role=role,
             provider=provider.name, model=route["model"],
         )
         try:
@@ -199,6 +215,28 @@ class Gateway:
     def _drop_hold(self, hold_id: int | None) -> None:
         if hold_id is not None:
             self.session.execute(delete(BudgetHold).where(BudgetHold.id == hold_id))
+
+    def _hold_build_budget(self, factory_session_id: int, estimate: float, *, role: str) -> int:
+        """Like _hold_budget, for a build: its row is locked (one queue per build), then its logged spend and the holds
+        in flight, this one's included, must stay within its own `budget_usd` — a refusal holds nothing and is
+        recorded on the build."""
+        limit = self.session.scalar(
+            select(FactorySession.budget_usd).where(FactorySession.id == factory_session_id).with_for_update()
+        )
+        hold = BudgetHold(factory_session_id=factory_session_id, usd=estimate)
+        self.session.add(hold)
+        self.session.flush()
+        held = build_held_usd(self.session, factory_session_id)
+        spent = build_spent_usd(self.session, factory_session_id)
+        limit = float(limit) if limit is not None else 0.0
+        if not math.isfinite(limit) or spent + held > limit:
+            self.session.delete(hold)
+            record_factory_event(self.session, factory_session_id, "budget.exceeded", None, role=role,
+                                 spent_usd=round(spent, 4), in_flight_usd=round(max(held - estimate, 0.0), 4),
+                                 limit_usd=limit if math.isfinite(limit) else str(limit))
+            self.session.commit()
+            raise BudgetExceeded(f"build budget ${limit} would be exceeded (spent ${spent:.4f})")
+        return hold.id
 
     def _hold_budget(
         self, project_id: int | None, task_id: int | None, budget: dict[str, Any], estimate: float, *,

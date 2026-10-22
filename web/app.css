@@ -1,10 +1,20 @@
+/* Theme A, light and minimal (FACTORY_UI_SPEC §5, owner decision d35): the default. #14B8A6 is the accent of lines
+   and highlights; text on a filled button uses the darker teal so it keeps AA contrast. */
 :root{
+  --bg:#F8FAFC; --surface:#FFFFFF; --surface-2:#F1F5F9; --sidebar:#FFFFFF;
+  --ink:#172033; --muted:#566074; --line:#E2E8F0;
+  --accent:#0F766E; --accent-ink:#FFFFFF; --accent-soft:#CCFBF1; --accent-line:#14B8A6;
+  --good:#15803D; --good-soft:#DCFCE7; --warn:#B45309; --warn-soft:#FEF3C7;
+  --bad:#DC2626; --bad-soft:#FEE2E2;
+  --radius:14px; --radius-sm:10px;
+}
+/* The earlier dark theme, a choice in Preferences (stored in this browser). */
+:root[data-theme="dark"]{
   --bg:#0A0E17; --surface:#111726; --surface-2:#161D2E; --sidebar:#0C1120;
   --ink:#E8ECF6; --muted:#8791A8; --line:#212B41;
-  --accent:#3B82F6; --accent-ink:#FFFFFF; --accent-soft:#152546;
+  --accent:#3B82F6; --accent-ink:#FFFFFF; --accent-soft:#152546; --accent-line:#22D3EE;
   --good:#22C55E; --good-soft:#123321; --warn:#EAB308; --warn-soft:#332B10;
   --bad:#F04949; --bad-soft:#3A1717;
-  --radius:14px; --radius-sm:10px;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:Vazirmatn,Tahoma,"Segoe UI",sans-serif;font-size:15px;line-height:1.8}
@@ -24,7 +34,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .nav{display:flex;flex-direction:column;gap:3px}
 .nav-item{position:relative;display:flex;align-items:center;gap:10px;min-height:44px;padding-inline:12px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--muted);font:inherit;font-size:14px;font-weight:600;cursor:pointer;text-align:start;width:100%}
 .nav-item .ic{font-size:16px;width:20px;text-align:center}
-.nav-item:hover{background:rgba(255,255,255,.05);color:var(--ink)}
+.nav-item:hover{background:var(--surface-2);color:var(--ink)}
 .nav-item.active{background:var(--accent);color:var(--accent-ink)}
 .nav-item .badge{position:absolute;top:4px;inset-inline-end:8px;min-width:16px;height:16px;line-height:16px;padding:0 4px;border-radius:999px;background:var(--bad);color:#fff;font-size:10px;font-weight:800;text-align:center}
 .nav-item .badge[hidden]{display:none}
@@ -179,3 +189,28 @@ code,pre,input[type=number]{unicode-bidi:plaintext}
 .chip.status-proposed{border:1px dashed var(--warn)}
 .chip.status-confirmed{background:var(--good-soft);color:var(--good)}
 textarea#build-answer{min-height:80px}
+
+/* ---------- build canvas (app/design.py) ---------- */
+.design-layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:14px;align-items:start}
+.canvas-card{position:relative;padding:8px}
+.canvas-tools{display:flex;gap:6px;position:absolute;inset-block-start:10px;inset-inline-end:10px;z-index:2}
+.canvas-tools button{min-width:36px;min-height:36px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer}
+svg.canvas{width:100%;height:auto;aspect-ratio:10/7;touch-action:none;cursor:grab;display:block}
+svg.canvas .edge{fill:none;stroke-width:3}
+svg.canvas .edge.confirmed{stroke:var(--accent-line)}
+svg.canvas .edge.proposed{stroke:var(--muted);stroke-dasharray:8 7}
+svg.canvas .edge.incomplete{stroke:var(--warn);stroke-dasharray:3 6}
+svg.canvas .node rect{fill:var(--surface);stroke:var(--line);stroke-width:2}
+svg.canvas .node.confirmed rect{stroke:var(--accent-line)}
+svg.canvas .node.proposed rect{stroke-dasharray:6 5}
+svg.canvas .node.incomplete rect{stroke:var(--warn)}
+svg.canvas .node.selected rect{stroke-width:4}
+svg.canvas .node:focus{outline:none}
+svg.canvas .node:focus rect{stroke:var(--accent);stroke-width:4}
+svg.canvas text{fill:var(--ink);font-family:inherit;font-size:17px}
+svg.canvas text.small{fill:var(--muted);font-size:13px}
+svg.canvas .center rect{fill:var(--accent-soft);stroke:var(--accent-line)}
+.branch-panel{position:sticky;top:76px}
+.branch-list .list-item{text-align:start}
+.dstatus{font-weight:800}
+@media (max-width: 899px){.design-layout{grid-template-columns:1fr}.branch-panel{position:static}}
