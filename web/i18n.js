@@ -15,10 +15,10 @@ var MESSAGES = /*MESSAGES*/{
   "agent.capabilities": "Capabilities",
   "agent.denied": "Not allowed",
   "agent.feedback.task": "Task #{id}",
-  "agent.feedback_down": "👎 Negative",
+  "agent.feedback_down": "Negative",
   "agent.feedback_empty_sub": "You can rate this agent's answers below each one.",
   "agent.feedback_empty_title": "No feedback yet",
-  "agent.feedback_up": "👍 Positive",
+  "agent.feedback_up": "Positive",
   "agent.model_role": "Model role: {role}",
   "agent.no_permissions": "No permissions defined.",
   "agent.no_skills": "No skills assigned.",
@@ -448,7 +448,7 @@ var MESSAGES = /*MESSAGES*/{
   "intake.restart": "Start over",
   "intake.summary_title": "Blueprint summary",
   "intake.title": "Build a new agent",
-  "intake.valid": "✅ The blueprint is valid.",
+  "intake.valid": "The blueprint is valid.",
   "lang.choose_sub": "Every page, question and message is shown in this language. You can change it later in Settings.",
   "lang.choose_title": "Choose your language",
   "lang.saved_locally": "The language was saved in this browser only (couldn't reach your account).",
@@ -726,6 +726,8 @@ var MESSAGES = /*MESSAGES*/{
   "tasks.unblock": "The specialist exists now: unblock",
   "theme.dark": "Dark",
   "theme.light": "Light",
+  "theme.system": "Same as the system",
+  "theme.toggle": "Switch between light and dark",
   "treason.budget_exhausted": "Budget used up",
   "treason.missing_specialist": "No such specialist yet",
   "treason.model_failed": "The model didn't answer",
@@ -805,6 +807,7 @@ var MESSAGES = /*MESSAGES*/{
   "workflow.connect": "Connect",
   "workflow.edges": "Connections",
   "workflow.from": "From",
+  "workflow.hist_approved": "approved",
   "workflow.history": "Versions",
   "workflow.issues": "To fix before approval",
   "workflow.kind": "Kind of connection",
@@ -842,10 +845,10 @@ var MESSAGES = /*MESSAGES*/{
   "agent.capabilities": "قابلیت‌ها",
   "agent.denied": "غیرمجاز",
   "agent.feedback.task": "وظیفه‌ی #{id}",
-  "agent.feedback_down": "👎 منفی",
+  "agent.feedback_down": "منفی",
   "agent.feedback_empty_sub": "زیر پاسخ‌های این ایجنت می‌توانی امتیاز بدهی.",
   "agent.feedback_empty_title": "هنوز بازخوردی ثبت نشده",
-  "agent.feedback_up": "👍 مثبت",
+  "agent.feedback_up": "مثبت",
   "agent.model_role": "نقش مدل: {role}",
   "agent.no_permissions": "مجوزی تعریف نشده.",
   "agent.no_skills": "مهارتی تخصیص داده نشده.",
@@ -1275,7 +1278,7 @@ var MESSAGES = /*MESSAGES*/{
   "intake.restart": "شروع دوباره",
   "intake.summary_title": "خلاصه‌ی Blueprint",
   "intake.title": "ساخت Agent جدید",
-  "intake.valid": "✅ Blueprint معتبر است.",
+  "intake.valid": "Blueprint معتبر است.",
   "lang.choose_sub": "همه‌ی صفحه‌ها، سؤال‌ها و پیام‌ها به این زبان نشان داده می‌شوند. بعداً از تنظیمات قابل تغییر است.",
   "lang.choose_title": "زبان را انتخاب کن",
   "lang.saved_locally": "زبان فقط روی همین مرورگر ذخیره شد (اتصال به حساب برقرار نشد).",
@@ -1553,6 +1556,8 @@ var MESSAGES = /*MESSAGES*/{
   "tasks.unblock": "متخصص الان هست: رفع انسداد",
   "theme.dark": "تیره",
   "theme.light": "روشن",
+  "theme.system": "مثل سیستم‌عامل",
+  "theme.toggle": "تعویض بین روشن و تیره",
   "treason.budget_exhausted": "بودجه تمام شد",
   "treason.missing_specialist": "این متخصص هنوز نیست",
   "treason.model_failed": "مدل پاسخ نداد",
@@ -1632,6 +1637,7 @@ var MESSAGES = /*MESSAGES*/{
   "workflow.connect": "اتصال",
   "workflow.edges": "اتصال‌ها",
   "workflow.from": "از",
+  "workflow.hist_approved": "تأییدشده",
   "workflow.history": "نسخه‌ها",
   "workflow.issues": "پیش از تأیید باید درست شود",
   "workflow.kind": "نوع اتصال",
@@ -1669,10 +1675,10 @@ var MESSAGES = /*MESSAGES*/{
   "agent.capabilities": "Yetenekler",
   "agent.denied": "İzinsiz",
   "agent.feedback.task": "Görev #{id}",
-  "agent.feedback_down": "👎 Olumsuz",
+  "agent.feedback_down": "Olumsuz",
   "agent.feedback_empty_sub": "Bu ajanın yanıtlarını her birinin altında puanlayabilirsiniz.",
   "agent.feedback_empty_title": "Henüz geri bildirim yok",
-  "agent.feedback_up": "👍 Olumlu",
+  "agent.feedback_up": "Olumlu",
   "agent.model_role": "Model rolü: {role}",
   "agent.no_permissions": "Tanımlı izin yok.",
   "agent.no_skills": "Atanmış beceri yok.",
@@ -2102,7 +2108,7 @@ var MESSAGES = /*MESSAGES*/{
   "intake.restart": "Baştan başla",
   "intake.summary_title": "Blueprint özeti",
   "intake.title": "Yeni ajan oluştur",
-  "intake.valid": "✅ Blueprint geçerli.",
+  "intake.valid": "Blueprint geçerli.",
   "lang.choose_sub": "Tüm sayfalar, sorular ve mesajlar bu dilde gösterilir. Daha sonra Ayarlar'dan değiştirebilirsiniz.",
   "lang.choose_title": "Dilinizi seçin",
   "lang.saved_locally": "Dil yalnızca bu tarayıcıya kaydedildi (hesabınıza ulaşılamadı).",
@@ -2380,6 +2386,8 @@ var MESSAGES = /*MESSAGES*/{
   "tasks.unblock": "Uzman artık var: engeli kaldır",
   "theme.dark": "Koyu",
   "theme.light": "Açık",
+  "theme.system": "Sistemle aynı",
+  "theme.toggle": "Açık ve koyu arasında geçiş",
   "treason.budget_exhausted": "Bütçe tükendi",
   "treason.missing_specialist": "Bu uzman henüz yok",
   "treason.model_failed": "Model yanıt vermedi",
@@ -2459,6 +2467,7 @@ var MESSAGES = /*MESSAGES*/{
   "workflow.connect": "Bağla",
   "workflow.edges": "Bağlantılar",
   "workflow.from": "Kaynak",
+  "workflow.hist_approved": "onaylı",
   "workflow.history": "Sürümler",
   "workflow.issues": "Onaydan önce düzeltilecekler",
   "workflow.kind": "Bağlantı türü",
@@ -2538,23 +2547,41 @@ function tIn(loc, key){
   return table[key] !== undefined ? table[key] : (MESSAGES[FALLBACK][key] !== undefined ? MESSAGES[FALLBACK][key] : key);
 }
 
+// "light", "dark", or "system" (the default: follow the operating system, and change with it).
 function storedTheme(){
-  try { return localStorage.getItem('af_theme') === 'dark' ? 'dark' : 'light'; } catch (e){ return 'light'; }
+  try { var v = localStorage.getItem('af_theme'); return v === 'dark' || v === 'light' ? v : 'system'; } catch (e){ return 'system'; }
+}
+function effectiveTheme(){
+  var chosen = storedTheme();
+  if (chosen !== 'system') return chosen;
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e){ return 'light'; }
 }
 function setTheme(theme){
-  try { localStorage.setItem('af_theme', theme === 'dark' ? 'dark' : 'light'); } catch (e){}
+  try {
+    if (theme === 'dark' || theme === 'light') localStorage.setItem('af_theme', theme); else localStorage.removeItem('af_theme');
+  } catch (e){}
   apply();
 }
+try {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (storedTheme() === 'system') apply(); });
+} catch (e){}
 
 function apply(){
-  var theme = storedTheme();
+  var theme = effectiveTheme();
   if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
   else document.documentElement.removeAttribute('data-theme');
+  var meta = document.getElementById('theme-color');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0B1220' : '#F8FAFC');
   var loc = locale();
   document.documentElement.lang = loc;
   document.documentElement.dir = isRtl(loc) ? 'rtl' : 'ltr';
   var nodes = document.querySelectorAll('[data-i18n]');
   for (var i = 0; i < nodes.length; i++) nodes[i].textContent = t(nodes[i].getAttribute('data-i18n'));
+  var labelled = document.querySelectorAll('[data-i18n-label]');
+  for (var k = 0; k < labelled.length; k++){
+    var text = t(labelled[k].getAttribute('data-i18n-label'));
+    labelled[k].setAttribute('aria-label', text); labelled[k].setAttribute('title', text);
+  }
 }
 
 // Switch the language of the whole UI; returns false (and changes nothing) for a language not offered.
@@ -2575,7 +2602,7 @@ function fmtTime(iso){
 window.I18N = {
   LOCALES: LOCALES, NATIVE_NAMES: NATIVE_NAMES,
   t: t, tIn: tIn, has: has, locale: locale, isRtl: isRtl, setLocale: setLocale, apply: apply,
-  storedLocale: readStored, fmtNum: fmtNum, fmtTime: fmtTime, theme: storedTheme, setTheme: setTheme
+  storedLocale: readStored, fmtNum: fmtNum, fmtTime: fmtTime, theme: storedTheme, effectiveTheme: effectiveTheme, setTheme: setTheme
 };
 
 // Before app.js draws anything: the page opens in the remembered language and direction, no flash of the other.
