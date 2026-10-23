@@ -114,17 +114,34 @@ function riskChip(risk){
   if (risk === 'low') return null;
   return el('span', {class:'chip risk-' + risk, text: lbl('risk', risk)});
 }
+var SVGNS = 'http://www.w3.org/2000/svg';
+// One icon family, drawn in the page's own sprite (index.html): never emoji, so every platform shows the same marks.
+function icon(name, cls){
+  var svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'icon' + (cls ? ' ' + cls : ''));
+  svg.setAttribute('aria-hidden', 'true');
+  var use = document.createElementNS(SVGNS, 'use');
+  use.setAttribute('href', '#i-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+// Status marks: confirmed / incomplete / not yet.
+function markName(status){ return status === 'confirmed' ? 'check' : (status === 'incomplete' ? 'warn' : 'pending'); }
+function withIcon(name, text, tag, props){
+  return el(tag || 'span', props || {}, icon(name), ' ', text);
+}
+
 function loadingBox(text){
   return el('div', {class:'loading-state'}, el('span', {class:'spin'}), el('span', {text: text || t('common.loading')}));
 }
 function errorBox(message, retry){
-  var b = el('div', {class:'error-state'}, el('div', {class:'ic', text:'⚠️'}), el('b', {text:t('common.problem')}),
+  var b = el('div', {class:'error-state'}, el('div', {class:'ic'}, icon('warn')), el('b', {text:t('common.problem')}),
     el('span', {text: message || t('common.server_error')}));
   if (retry) b.appendChild(el('button', {class:'btn sm', style:'margin-top:6px', onclick: retry}, t('common.retry')));
   return b;
 }
-function emptyBox(icon, title, sub){
-  return el('div', {class:'empty-state'}, el('div', {class:'ic', text: icon}), el('b', {text: title}),
+function emptyBox(name, title, sub){
+  return el('div', {class:'empty-state'}, el('div', {class:'ic'}, icon(name)), el('b', {text: title}),
     sub ? el('span', {text: sub}) : null);
 }
 
@@ -316,7 +333,7 @@ function codeLine(text){
 }
 function checkRow(ok, text){
   return el('div', {class:'row', style:'gap:8px'},
-    el('span', {class:'chip ' + (ok ? 'status-COMPLETED' : 'status-FAILED'), text: (ok ? '✓ ' : '✗ ') + (ok ? t('setup.ok') : t('setup.missing'))}),
+    withIcon(ok ? 'check' : 'x', ok ? t('setup.ok') : t('setup.missing'), 'span', {class:'chip ' + (ok ? 'status-COMPLETED' : 'status-FAILED')}),
     el('span', {text:text}));
 }
 
@@ -377,7 +394,7 @@ function renderSetup(root){
       api('/setup/test-model', {method:'POST'}).then(function(r){
         clear(result);
         if (r.ok){
-          result.appendChild(el('p', {class:'chip status-COMPLETED', text:'✓ ' + t('setup.test_ok', {reply: r.reply, provider: r.provider, model: r.model, seconds: fmtNum(Math.round((r.duration_ms || 0) / 100) / 10)})}));
+          result.appendChild(withIcon('check', t('setup.test_ok', {reply: r.reply, provider: r.provider, model: r.model, seconds: fmtNum(Math.round((r.duration_ms || 0) / 100) / 10)}), 'p', {class:'chip status-COMPLETED'}));
         } else {
           result.appendChild(el('p', {class:'err', text:t('setup.test_failed')}));
           result.appendChild(el('pre', {class:'code', dir:'ltr', text:r.error}));
@@ -399,8 +416,8 @@ function renderSetup(root){
     body.appendChild(modelCard(s));
 
     var keys = el('div', {class:'card stack'}, el('h3', {text:t('setup.step_keys')}));
-    if (s.keys.available) keys.appendChild(el('p', {text:'✓ ' + t('setup.keys_ok')}));
-    else keys.appendChild(el('p', {class:'err', text:'✗ ' + (s.keys.reason === 'crypto_unavailable' ? t('setup.keys_crypto') : t('setup.keys_secret'))}));
+    if (s.keys.available) keys.appendChild(withIcon('check', t('setup.keys_ok'), 'p', {class:'ok-line'}));
+    else keys.appendChild(withIcon('x', (s.keys.reason === 'crypto_unavailable' ? t('setup.keys_crypto') : t('setup.keys_secret')), 'p', {class:'err'}));
     keys.appendChild(el('p', {class:'muted', text:t('setup.keys_backup')}));
     body.appendChild(keys);
 
@@ -472,8 +489,8 @@ function feedbackWidget(projectId, agent, taskId){
   var wrap = el('div', {class:'feedback-row'});
   var note = el('input', {type:'text', placeholder:t('common.note_optional'), style:'flex:1 1 160px'});
   var status = el('span', {class:'muted'});
-  var up = el('button', {class:'thumb', type:'button', text:'👍'});
-  var down = el('button', {class:'thumb', type:'button', text:'👎'});
+  var up = el('button', {class:'thumb', type:'button', 'aria-label':t('agent.feedback_up')}, icon('thumb-up'));
+  var down = el('button', {class:'thumb', type:'button', 'aria-label':t('agent.feedback_down')}, icon('thumb-down'));
   function submit(rating){
     up.classList.toggle('active-up', rating === 'up');
     down.classList.toggle('active-down', rating === 'down');
@@ -502,7 +519,7 @@ function renderInbox(root){
       clear(body);
       refreshInboxBadge();
       if (!items.length){
-        body.appendChild(emptyBox('📥', t('inbox.empty_title'), t('inbox.empty_sub')));
+        body.appendChild(emptyBox('inbox', t('inbox.empty_title'), t('inbox.empty_sub')));
         return;
       }
       items.forEach(function(it){ body.appendChild(inboxCard(it, load)); });
@@ -642,7 +659,7 @@ function renderDashboardBody(body, projects, usages, events){
   clear(body);
   setupHint(body);
   if (!projects.length){
-    body.appendChild(emptyBox('📊', t('dashboard.empty_title'), t('dashboard.empty_sub')));
+    body.appendChild(emptyBox('dashboard', t('dashboard.empty_title'), t('dashboard.empty_sub')));
     body.appendChild(el('button', {class:'btn', onclick:function(){ go('projects'); }}, t('dashboard.create_first')));
     return;
   }
@@ -711,7 +728,7 @@ function renderProjectsList(root){
     Promise.all([fetchProjects(), fetchWorkspaces()]).then(function(){
       clear(body);
       if (!STATE.projects.length){
-        body.appendChild(emptyBox('📁', t('projects.empty_title'), t('projects.empty_sub')));
+        body.appendChild(emptyBox('projects', t('projects.empty_title'), t('projects.empty_sub')));
         return;
       }
       var list = el('div', {class:'list'});
@@ -984,7 +1001,7 @@ function renderProjectDetail(root, projectId){
   }
 
   function drawTasks(panel){
-    if (!tasks.length){ panel.appendChild(emptyBox('🗂️', t('tasks.empty_title'), t('tasks.empty_sub'))); return; }
+    if (!tasks.length){ panel.appendChild(emptyBox('projects', t('tasks.empty_title'), t('tasks.empty_sub'))); return; }
     var list = el('div', {class:'list'});
     tasks.forEach(function(task){ list.appendChild(taskRow(task)); });
     panel.appendChild(list);
@@ -1236,7 +1253,7 @@ function renderProjectDetail(root, projectId){
   }
 
   function drawEvents(panel){
-    if (!events.length){ panel.appendChild(emptyBox('📜', t('common.no_events_title'))); return; }
+    if (!events.length){ panel.appendChild(emptyBox('log', t('common.no_events_title'))); return; }
     var card = el('div', {class:'card'});
     events.slice().reverse().forEach(function(e){ card.appendChild(eventRow(e)); });
     panel.appendChild(card);
@@ -1271,7 +1288,7 @@ function renderProjectDetail(root, projectId){
           clear(listBox);
           var items = r[0], traces = r[1];
           if (!items.length && !traces.length){
-            listBox.appendChild(emptyBox('🧠', t('memory.empty_title'),
+            listBox.appendChild(emptyBox('cpu', t('memory.empty_title'),
               t('memory.empty_sub')));
             return;
           }
@@ -1351,7 +1368,7 @@ function renderAgentsList(root){
   body.appendChild(loadingBox());
   api('/agents').then(function(agents){
     clear(body);
-    if (!agents.length){ body.appendChild(emptyBox('🤖', t('agents.empty'))); return; }
+    if (!agents.length){ body.appendChild(emptyBox('agents', t('agents.empty'))); return; }
     agents.forEach(function(a){
       body.appendChild(el('button', {class:'list-item', onclick:function(){ go('agents/' + encodeURIComponent(a.name)); }},
         el('div', {class:'top'}, el('b', {text:a.name}),
@@ -1398,7 +1415,7 @@ function renderAgentDetail(root, name){
       feedbackCount = list.length;
       drawTabs();
       clear(panel);
-      if (!list.length){ panel.appendChild(emptyBox('🎓', t('agent.feedback_empty_title'), t('agent.feedback_empty_sub'))); return; }
+      if (!list.length){ panel.appendChild(emptyBox('learn', t('agent.feedback_empty_title'), t('agent.feedback_empty_sub'))); return; }
       var card = el('div', {class:'card'});
       list.forEach(function(f){
         card.appendChild(el('div', {class:'stack', style:'gap:4px;padding-block:8px;border-top:1px solid var(--line)'},
@@ -1515,13 +1532,13 @@ function renderAgentIntake(root){
     if (q.type === 'single_choice' || q.type === 'confirm'){
       var opts = q.type === 'confirm' ? [{value:true,label:t('common.yes')},{value:false,label:t('common.no')}] : q.options;
       card.appendChild(el('div', {class:'row'}, opts.map(function(o){
-        var label = o.label + (o.recommended ? ' ✓' : '');
+        var label = o.recommended ? [icon('check'), ' ' + o.label] : o.label;
         return el('button', {class:'btn' + (o.recommended ? '' : ' ghost') + ' sm', onclick:function(){ submit(q.target, o.value); }}, label);
       })));
     } else if (q.type === 'multi_choice'){
       var chosen = [];
       var chips = q.options.map(function(o){
-        var b = el('button', {class:'tab', text: o.label + (o.recommended ? ' ✓' : '')});
+        var b = el('button', {class:'tab'}, o.recommended ? icon('check') : null, o.recommended ? ' ' + o.label : o.label);
         b.addEventListener('click', function(){
           var i = chosen.indexOf(o.value);
           if (i === -1){ chosen.push(o.value); b.classList.add('active'); } else { chosen.splice(i, 1); b.classList.remove('active'); }
@@ -1548,7 +1565,7 @@ function renderAgentIntake(root){
     });
     if (state.issues && state.issues.length){
       card.appendChild(el('h3', {text:t('intake.issues')}));
-      state.issues.forEach(function(i){ card.appendChild(el('p', {class:'muted', text:'⚠️ ' + i})); });
+      state.issues.forEach(function(i){ card.appendChild(withIcon('warn', i, 'p', {class:'muted'})); });
     } else {
       card.appendChild(el('p', {text:t('intake.valid')}));
     }
@@ -1639,7 +1656,7 @@ function renderBuild(root, id){
       var here = step.stages.indexOf(stage) >= 0;
       var cls = here ? 'step now' : (reached ? 'step done' : 'step');
       bar.appendChild(el('li', {class: cls, 'aria-current': here ? 'step' : null},
-        el('span', {class:'step-mark', 'aria-hidden':'true', text: here ? '●' : (reached ? '✓' : '○')}),
+        el('span', {class:'step-mark', 'aria-hidden':'true'}, here ? icon('dot') : (reached ? icon('check') : icon('pending'))),
         el('span', {text: t('build.step.' + step.key)})));
       if (here) reached = false;
     });
@@ -1782,7 +1799,7 @@ function renderBuild(root, id){
         var ok = k.verdict === 'PASS';
         var reply = typeof k.output === 'string' ? k.output : (k.output && k.output.summary) || '';
         box.appendChild(el('div', {class:'case ' + (ok ? 'case-pass' : 'case-fail')},
-          el('p', {}, el('b', {text: (ok ? '✓ ' : '✗ ') + lbl('dtest', k.kind) + ': '}), k.input || '—'),
+          el('p', {}, icon(ok ? 'check' : 'x'), ' ', el('b', {text: lbl('dtest', k.kind) + ': '}), k.input || '—'),
           el('p', {class:'muted', text: t('agentbuild.reply') + ': ' + reply}),
           el('p', {class:'muted', text: k.reason === 'invalid_output' ? t('agentbuild.invalid_output') : (k.reason === 'judge_invalid' ? t('agentbuild.judge_invalid') : k.reason)})));
       });
@@ -1836,7 +1853,6 @@ function renderBuild(root, id){
     if (typeof v === 'object') return JSON.stringify(v);
     return String(v);
   }
-  function statusIcon(status){ return status === 'confirmed' ? '✓' : (status === 'incomplete' ? '⚠' : '◌'); }
 
   function designActions(d){
     var status = el('p', {class:'err muted', role:'status'});
@@ -1883,7 +1899,9 @@ function renderBuild(root, id){
         'aria-label': lbl('branch', b.key) + ' — ' + lbl('dstatus', b.status), transform: 'translate(' + (x - 95) + ',' + (y - 34) + ')'});
       g.appendChild(svgEl('rect', {width:'190', height:'68', rx:'14'}));
       g.appendChild(svgEl('text', {x:'95', y:'30', 'text-anchor':'middle'}, lbl('branch', b.key)));
-      g.appendChild(svgEl('text', {x:'95', y:'52', 'text-anchor':'middle', class:'small'}, statusIcon(b.status) + ' ' + lbl('dstatus', b.status)));
+      g.appendChild(svgEl('text', {x:'95', y:'52', 'text-anchor':'middle', class:'small'}, lbl('dstatus', b.status)));
+      var mark = svgEl('use', {href:'#i-' + markName(b.status), x:'12', y:'10', width:'20', height:'20', class:'mark mark-' + b.status});
+      g.appendChild(mark);
       function open(){ selectedBranch = b.key; draw(st); }
       g.addEventListener('click', open);
       g.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); } });
@@ -1977,14 +1995,14 @@ function renderBuild(root, id){
 
   function branchPanel(b, d){
     var panel = el('div', {class:'card stack branch-panel', 'aria-live':'polite'});
-    panel.appendChild(el('h3', {}, statusIcon(b.status) + ' ' + lbl('branch', b.key)));
+    panel.appendChild(el('h3', {}, icon(markName(b.status)), ' ' + lbl('branch', b.key)));
     panel.appendChild(el('p', {class:'chip dstatus', text: lbl('dstatus', b.status) + ' · ' + lbl('dsource', b.source)}));
     panel.appendChild(el('p', {class:'muted', text: t('branch_help.' + b.key)}));
     Object.keys(b.values).forEach(function(path){
       if (path === 'agent_core.name' && audience() !== 'developer') return;  // a developer's detail
       panel.appendChild(el('div', {class:'brief-row'}, el('b', {text: lbl('dfield', path)}), el('p', {dir:'auto', text: fmtValue(b.values[path])})));
     });
-    b.issues.forEach(function(i){ panel.appendChild(el('p', {class:'err muted', dir:'ltr', text: '⚠ ' + i})); });
+    b.issues.forEach(function(i){ panel.appendChild(withIcon('warn', i, 'p', {class:'err muted', dir:'ltr'})); });
     if (showCode()) panel.appendChild(el('p', {class:'muted', dir:'ltr', text: t('design.sections') + ': ' + b.sections.join(', ')}));
     var ed = editor(b, d);
     if (ed) panel.appendChild(ed);
@@ -2016,7 +2034,7 @@ function renderBuild(root, id){
       var list = el('div', {class:'list branch-list'});
       d.branches.forEach(function(b){
         list.appendChild(el('button', {class:'list-item', 'aria-expanded': String(b.key === sel.key), onclick: function(){ selectedBranch = b.key; draw(st); }},
-          el('div', {class:'top'}, el('b', {text: statusIcon(b.status) + ' ' + lbl('branch', b.key)}), el('span', {class:'chip', text: lbl('dstatus', b.status)}))));
+          el('div', {class:'top'}, el('b', {}, icon(markName(b.status)), ' ' + lbl('branch', b.key)), el('span', {class:'chip', text: lbl('dstatus', b.status)}))));
         if (b.key === sel.key) list.appendChild(branchPanel(b, d));
       });
       wrap.appendChild(list);
@@ -2077,7 +2095,7 @@ function renderWorkflowsList(root){
   list.appendChild(loadingBox());
   api('/workflows').then(function(rows){
     clear(list);
-    if (!rows.length){ list.appendChild(emptyBox('🔗', t('workflows.empty_title'), t('workflows.empty_sub'))); return; }
+    if (!rows.length){ list.appendChild(emptyBox('workflows', t('workflows.empty_title'), t('workflows.empty_sub'))); return; }
     rows.forEach(function(w){
       list.appendChild(el('button', {class:'list-item', onclick:function(){ go('workflow/' + w.id); }},
         el('div', {class:'top'}, el('b', {text:w.name}),
@@ -2182,10 +2200,11 @@ function renderWorkflow(root, id){
     nodes.forEach(function(n){
       var p = pos[n.id];
       var g = svgEl('g', {class:'node wfn-' + n.type + (bad[n.id] ? ' incomplete' : ' confirmed') + (selected === n.id ? ' selected' : ''),
-        tabindex:'0', role:'button', 'aria-label': lbl('wfnode', n.type) + ': ' + nodeLabel(n) + (bad[n.id] ? ' ⚠' : ''),
+        tabindex:'0', role:'button', 'aria-label': lbl('wfnode', n.type) + ': ' + nodeLabel(n) + (bad[n.id] ? ' — ' + t('workflow.issues') : ''),
         transform:'translate(' + p.x + ',' + p.y + ')'});
       g.appendChild(svgEl('rect', {width:NODE_W, height:NODE_H, rx:'14'}));
-      g.appendChild(svgEl('text', {x:NODE_W / 2, y:'30', 'text-anchor':'middle'}, (bad[n.id] ? '⚠ ' : '') + nodeLabel(n).slice(0, 22)));
+      g.appendChild(svgEl('text', {x:NODE_W / 2, y:'30', 'text-anchor':'middle'}, nodeLabel(n).slice(0, 22)));
+      if (bad[n.id]) g.appendChild(svgEl('use', {href:'#i-warn', x:'10', y:'8', width:'18', height:'18', class:'mark mark-incomplete'}));
       g.appendChild(svgEl('text', {x:NODE_W / 2, y:'54', 'text-anchor':'middle', class:'small'},
         lbl('wfnode', n.type) + (n.type === 'agent' && n.version ? ' · v' + n.version : '')));
       g.appendChild(svgEl('circle', {class:'port', cx:NODE_W, cy:NODE_H / 2, r:'6'}));
@@ -2385,7 +2404,7 @@ function renderWorkflow(root, id){
     body.appendChild(el('p', {class:'muted wf-mobile-hint', text:t('workflow.mobile_hint')}));
     if (wf.issues && wf.issues.length && !dirty){
       body.appendChild(el('div', {class:'card stack', role:'status'}, el('b', {text:t('workflow.issues')}),
-        wf.issues.map(function(i){ return el('p', {class:'issue', text:'⚠ ' + issueText(i)}); })));
+        wf.issues.map(function(i){ return withIcon('warn', issueText(i), 'p', {class:'issue'}); })));
     }
     var list = el('div', {class:'stack'});
     nodes.forEach(function(n){ list.appendChild(nodeCard(n)); });
@@ -2395,7 +2414,7 @@ function renderWorkflow(root, id){
     body.appendChild(actions());
     if ((wf.history || []).length > 1){
       body.appendChild(el('p', {class:'muted'}, el('b', {text:t('workflow.history') + ': '}),
-        wf.history.map(function(v){ return 'v' + v.version + (v.approved ? ' ✓' : ''); }).join(' · ')));
+        wf.history.map(function(v){ return 'v' + v.version + (v.approved ? ' (' + t('workflow.hist_approved') + ')' : ''); }).join(' · ')));
     }
   }
   load();
@@ -2864,7 +2883,7 @@ function preferencesCard(){
     card.appendChild(el('h3', {text: t('prefs.title')}));
     card.appendChild(el('p', {class:'muted', text: t('prefs.sub')}));
     var theme = el('select', {id:'pref-theme'});
-    ['light', 'dark'].forEach(function(v){ theme.appendChild(el('option', {value: v}, lbl('theme', v))); });
+    ['system', 'light', 'dark'].forEach(function(v){ theme.appendChild(el('option', {value: v}, lbl('theme', v))); });
     theme.value = I18N.theme();
     theme.addEventListener('change', function(){ I18N.setTheme(theme.value); });
     card.appendChild(el('div', {class:'grid grid-3'},
@@ -3022,7 +3041,7 @@ function renderBenchmark(root){
     api('/benchmarks').then(function(runs){
       clear(body);
       if (!runs.length){
-        body.appendChild(emptyBox('📈', t('bench.empty_title'), t('bench.empty_sub')));
+        body.appendChild(emptyBox('benchmark', t('bench.empty_title'), t('bench.empty_sub')));
         return;
       }
       var wrap = el('div', {class:'table-wrap'});
@@ -3040,7 +3059,14 @@ function renderBenchmark(root){
 
 var booted = false;
 
+function wireThemeToggle(){
+  var button = document.getElementById('theme-toggle');
+  if (!button) return;
+  button.addEventListener('click', function(){ I18N.setTheme(I18N.effectiveTheme() === 'dark' ? 'light' : 'dark'); });
+}
+
 function boot(){
+  wireThemeToggle();
   root = document.getElementById('page-root');
   if (!booted){
     booted = true;
