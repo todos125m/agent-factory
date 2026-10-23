@@ -18,7 +18,7 @@
 | G9 ✅ PR4 | runtime محدود: step loop، RunSnapshot، lease/heartbeat، تکرار نکردن اثر | هر اجرای task یک فراخوانی همزمان داخل درخواست HTTP است (`run_task`)؛ worker، lease، snapshot و ToolExecution ندارد؛ ابزار فقط `web_search` سمت سرور ارائه‌دهنده | بدون سقف step و بدون بازیابی crash | ۴ |
 | G10 ✅ PR5 | Builder و Reviewer/Evaluator، موارد عادی/مرزی/شکست | ساخته نشده (فاز ۶ README خالی)؛ `BenchmarkRun` فقط مسیر مدل‌ها را مقایسه می‌کند | «JSON معتبر با نتیجه‌ی ناموفق» امروز تشخیص داده نمی‌شود | ۵ |
 | G11 ✅ PR6 + PR6ب | بوم workflow، typed edges، credential_ref | ندارد؛ کلیدها فقط متغیر محیطی سراسری‌اند | ✅ | ۶ |
-| G12 | API بیرونی با scope، quota، نسخه‌ی pinned | ندارد | | ۷ |
+| G12 ✅ PR7 | API بیرونی با scope، quota، نسخه‌ی pinned | ندارد | | ۷ |
 | G13 ✅ PR2a | مهاجرت قابل تکرار SQLite/PostgreSQL | `create_all` + `ensure_indexes` + `ensure_column_lengths` (`app/db.py`): جدول و ایندکس جدید و عریض‌کردن؛ **افزودن ستون به جدول موجود ممکن نیست** | G8/G6 بدون مهاجرت قابل انجام نیستند | تصمیم قبل از ۲ |
 | G14 | چهار محور تنظیمات؛ fa/en/tr؛ خطا با code | **بسته شد در PR1** (این برنچ) | — | ۱ ✅ |
 | G15 | برچسب رویدادها برای کاربر عادی | رویدادها با نام فنی (`task.status_changed`) نمایش داده می‌شوند | زبان فنی در داشبورد کاربر عادی | ۲ (UI) |
@@ -39,7 +39,7 @@
 | ۴ | DAG متخصص ناموجود و runtime محدود یک نقش (G7–G9) | وابستگی حفظ؛ action/observation؛ سقف هزینه و توقف قابل اثبات | **انجام شد** (ابزار پیاده‌شده: فقط `memory_search`؛ بقیه رد با `tool_unavailable` تا PR6) |
 | ۵ | Builder/Evaluator محدود و activation نسخه‌دار (G6، G10) | PASS واقعی و تأیید نهایی؛ اصلاح bounded؛ rollback | **انجام شد** (d36 داور مدل، d37 مسیر مستقیم ادمین می‌ماند، d38 سقف ۳ دور) |
 | ۶ | workflow typed edges و اتصال provider/tool (G11) | ناسازگاری/چرخه/مالکیت رد؛ Save جدا از Run؛ credentials امن | |
-| ۷ | API بیرونی در صورت آمادگی (G12) | scope، quota، version pin، checkpoint؛ در غیر این صورت «در دسترس نیست» | |
+| ۷ | API بیرونی در صورت آمادگی (G12) | scope، quota، version pin، checkpoint؛ در غیر این صورت «در دسترس نیست» | **انجام شد** (d42 کلید = تأیید دائمی، d43 سقف روزانه + بودجه‌ی هر اجرا، d44 فقط ایجنت ساخته و فعال‌شده‌ی مالک) |
 
 هر PR مسیر قابل استفاده تحویل می‌دهد (backend + UI + خطاهای همان مسیر)، branch از برنچ مبنا و PR به همان برنچ؛ merge،
 deploy و افزایش مجوزهای محصول مجوز جداگانه می‌خواهند.

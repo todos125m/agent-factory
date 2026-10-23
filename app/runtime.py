@@ -108,7 +108,8 @@ def active_run(session: Session, task: Task) -> Run | None:
                           .order_by(Run.id.desc()).limit(1))
 
 
-def start(session: Session, project: Project, task: Task, user: User) -> Run:
+def start(session: Session, project: Project, task: Task, user: User, *, api_key_id: int | None = None,
+          api_request_id: str | None = None) -> Run:
     """Snapshot what this run may do and queue it. The task must be RUNNING (its checkpoint decided) and have no open
     run; the limits come from the settings layers, the permissions and tools from the agent as it is now."""
     lock_project(session, project.id)  # then the task row: two starts at once queue here, the second sees the first
@@ -126,6 +127,7 @@ def start(session: Session, project: Project, task: Task, user: User) -> Run:
         model_role=agent.model_role, state="queued", policy=settings["interaction_policy"],
         limits={**DEFAULT_LIMITS, "max_steps": min(int(settings["max_steps"]), 20)},
         permissions=dict(agent.permissions or {}), tools=list(agent.tools or []), created_by=user.id,
+        api_key_id=api_key_id, api_request_id=api_request_id,
     )
     session.add(run)
     session.flush()
@@ -452,7 +454,7 @@ def _use_tool(session: Session, run: Run, tool: str, args: dict[str, Any], *, ap
 
 
 def respond(session: Session, project: Project, task: Task, run: Run, user: User, *, text: str | None,
-            approve: bool | None, happened: bool | None) -> Run:
+            approve: bool | None, happened: bool | None, via: str | None = None) -> Run:
     """The owner's answer to what the run waits on — a question (text), a tool action (approve) or a tool whose outcome
     is unknown (happened) — stored as a step; then the same run continues (queued for a worker)."""
     run = session.scalar(select(Run).where(Run.id == run.id).with_for_update()  # two answers at once: one wins
@@ -463,7 +465,7 @@ def respond(session: Session, project: Project, task: Task, run: Run, user: User
     if kind == "question":
         if not text or not text.strip():
             raise AppError(422, "answer_required", "Write an answer")
-        _record(session, run, "answer", text=text.strip(), by=user.id)
+        _record(session, run, "answer", text=text.strip(), by=user.id, **({"via": via} if via else {}))
         run.pending = None
     elif kind == "tool_approval":
         if approve is None:

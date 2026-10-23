@@ -2343,12 +2343,90 @@ function connectionsCard(onChange){
   return card;
 }
 
+// The owner's API keys (app/external.py): the secret is shown once, in this card, and nowhere after.
+function apiKeysCard(){
+  var card = el('div', {class:'card stack'}, el('h3', {text:t('apik.title')}), el('p', {class:'muted', text:t('apik.help')}));
+  var secretBox = el('div', {class:'stack'});
+  var list = el('div', {class:'stack'});
+  var form = el('div', {class:'stack'});
+  var status = el('p', {class:'err muted', role:'status'});
+  card.appendChild(secretBox); card.appendChild(list); card.appendChild(form); card.appendChild(status);
+
+  function load(){
+    Promise.all([api('/api-keys'), api('/projects')]).then(function(r){ draw(r[0], r[1]); })
+      .catch(function(e){ clear(list); list.appendChild(errorBox(e.message, load)); });
+  }
+  function showSecret(secret){
+    clear(secretBox);
+    var code = el('code', {dir:'ltr', style:'word-break:break-all;display:block', text:secret});
+    var copy = el('button', {class:'btn sm', type:'button', text:t('apik.copy')});
+    copy.addEventListener('click', function(){
+      try { navigator.clipboard.writeText(secret).then(function(){ copy.textContent = t('apik.copied'); }); } catch(e){}
+    });
+    secretBox.appendChild(el('div', {class:'notice stack', role:'status'}, el('b', {text:t('apik.secret_title')}),
+      el('p', {text:t('apik.secret_help')}), code, el('div', {class:'btn-row'}, copy),
+      el('p', {class:'muted'}, el('b', {text:t('apik.use') + ': '}), t('apik.use_help')),
+      el('pre', {class:'code', dir:'ltr', text:
+        'curl -X POST ' + location.origin + '/api/v1/runs \\\n  -H "Authorization: Bearer ' + secret.slice(0, 8) + '…" \\\n' +
+        '  -H "Content-Type: application/json" \\\n  -d \'{"input": "…", "request_id": "unique-id-1"}\''})));
+  }
+  function draw(r, projects){
+    clear(list); clear(form);
+    if (!r.items.length) list.appendChild(el('p', {class:'muted', text:t('apik.empty')}));
+    r.items.forEach(function(k){
+      var revoke = el('button', {class:'btn ghost sm', type:'button', text:t('apik.revoke')});
+      revoke.addEventListener('click', function(){
+        if (!window.confirm(t('apik.revoke_confirm', {name: k.name}))) return;
+        revoke.disabled = true;
+        api('/api-keys/' + k.id, {method:'DELETE'}).then(load).catch(function(e){ status.textContent = e.message; revoke.disabled = false; });
+      });
+      list.appendChild(el('div', {class:'row', style:'justify-content:space-between;flex-wrap:wrap;gap:8px'},
+        el('span', {}, el('b', {text:k.name}), ' ', el('code', {dir:'ltr', text:k.prefix + '…'}), el('br'),
+          el('small', {class:'muted', text:t('apik.row', {agent:k.agent, version:fmtNum(k.agent_version), runs:fmtNum(k.runs_today),
+            max:fmtNum(k.max_runs_per_day), budget:String(k.budget_per_run_usd)}) + ' · ' + k.scopes.map(function(x){ return lbl('apscope', x); }).join(t('list.sep'))})),
+        revoke));
+    });
+    if (!r.agents.length){ form.appendChild(el('p', {class:'muted', text:t('apik.none_agents')})); return; }
+    var name = el('input', {type:'text', maxlength:'100', 'aria-label':t('apik.name'), placeholder:t('apik.name')});
+    var agent = el('select', {'aria-label':t('apik.agent')});
+    r.agents.forEach(function(a){ agent.appendChild(el('option', {value:a.name + '@' + a.version}, a.name + ' · v' + a.version)); });
+    var project = el('select', {'aria-label':t('apik.project')});
+    projects.forEach(function(p){ project.appendChild(el('option', {value:String(p.id)}, p.title)); });
+    var perDay = el('input', {type:'number', min:'1', max:'10000', value:String(r.defaults.max_runs_per_day), 'aria-label':t('apik.runs_per_day')});
+    var budget = el('input', {type:'number', min:'0.01', max:'100', step:'0.01', value:String(r.defaults.budget_per_run_usd), 'aria-label':t('apik.budget')});
+    var boxes = r.scopes.map(function(sc){
+      var cb = el('input', {type:'checkbox', checked:'checked', id:'apik-' + sc});
+      cb._scope = sc;
+      return el('label', {class:'inline', for:'apik-' + sc}, cb, ' ' + lbl('apscope', sc));
+    });
+    var make = el('button', {class:'btn', type:'button', text:t('apik.create')});
+    make.addEventListener('click', function(){
+      if (!name.value.trim() || !project.value) return;
+      var parts = agent.value.split('@');
+      var scopes = boxes.map(function(l){ return l.firstChild; }).filter(function(cb){ return cb.checked; }).map(function(cb){ return cb._scope; });
+      make.disabled = true; status.textContent = '';
+      api('/api-keys', {method:'POST', json:{name: name.value.trim(), agent: parts[0], agent_version: Number(parts[1]),
+        project_id: Number(project.value), scopes: scopes, max_runs_per_day: Number(perDay.value),
+        budget_per_run_usd: Number(budget.value), request_id: newRequestId()}})
+        .then(function(k){ showSecret(k.secret); load(); })
+        .catch(function(e){ status.textContent = e.message; make.disabled = false; });
+    });
+    form.appendChild(el('div', {class:'row', style:'flex-wrap:wrap;gap:8px'}, name, agent, project));
+    form.appendChild(el('div', {class:'row', style:'flex-wrap:wrap;gap:12px'}, el('b', {text:t('apik.scopes') + ':'}), boxes));
+    form.appendChild(el('div', {class:'row', style:'flex-wrap:wrap;gap:8px;align-items:end'},
+      el('label', {class:'f'}, t('apik.runs_per_day'), perDay), el('label', {class:'f'}, t('apik.budget'), budget), make));
+  }
+  load();
+  return card;
+}
+
 function renderSettings(root){
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('nav.settings')})));
   root.appendChild(accountCard());
   root.appendChild(preferencesCard());
   var formDrawn = false;  // the model form lists the connections, so it is drawn again when they change
   root.appendChild(connectionsCard(function(){ if (formDrawn) loadLayer(); }));
+  root.appendChild(apiKeysCard());
   var scopePicker = el('div', {class:'tabs', role:'tablist'});
   var scopeExtra = el('div', {class:'card', id:'scope-extra'});
   var body = el('div', {class:'stack'});

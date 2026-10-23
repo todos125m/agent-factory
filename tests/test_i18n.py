@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import build, credentials, runtime, workflow
+from app import build, credentials, external, runtime, workflow
 from app.design import ALLOWED_SOURCES, BRANCHES, EDITABLE
 from app.factory import field_specs
 from app.registry import KNOWN_TOOLS
@@ -101,6 +101,7 @@ LABELLED = {
     "tstate": sorted(runtime.EXECUTION_STATES),
     "vstate": sorted(build.VERSION_STATES),
     "ctest": list(credentials.TEST_RESULTS),
+    "apscope": list(external.SCOPES),
     "cprovider": list(credentials.PROVIDERS),
     "wfkind": list(workflow.EDGE_KINDS),
     "wfnode": list(workflow.NODE_TYPES),
@@ -115,7 +116,7 @@ LABELLED = {
     "level_help": list(AUDIENCE_LEVELS),
     "code": list(CODE_VISIBILITY),
     "resource": ["project", "task", "user", "workspace", "agent", "skill", "benchmark_run", "global", "item",
-                 "factory_session", "workflow", "credential"],
+                 "factory_session", "workflow", "credential", "api_key"],
     "fstatus": ["draft", "proposed", "confirmed"],
     "fsource": ["user", "default", "suggestion", "unknown"],
     "fstage": [s.value for s in FactoryStage],

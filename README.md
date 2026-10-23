@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR7 pending | 🟡 PR6b |
+| Human-guided factory (Issue #2) | PR7: external API — scoped keys that run one activated agent version of yours inside limits you set. PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). all 7 PRs done | ✅ PR7 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -247,6 +247,34 @@ from the currently approved brief and moves the build to BUILDING (PR5). The UI'
 | POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
 | POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
 | POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
+
+### External API (issue #2 PR7)
+
+Settings → API keys makes a key for an outside program. Making it is **your standing approval** of exactly: one agent version you
+built, evaluated and activated here, one of your projects, its scopes (`run`, `read`, `answer`) and its limits (runs per 24 hours,
+default 20; dollars per run, default 0.50). The secret (`afk_…`) is shown once; only its hash is kept. Calls run in the bounded
+runtime: a read-only tool may run, but **any tool action or unclear outcome waits for you in the inbox**, and the program can only
+answer the agent's questions. There is no external route that approves a plan, checkpoint, design, activation or tool. Every call
+re-checks the key, that the agent is still that active version, that the project isn't paused, and the quota — before any spend.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/runs -H "Authorization: Bearer $KEY" \
+     -H "Content-Type: application/json" -d '{"input": "…", "request_id": "unique-id-1"}'
+curl http://localhost:8000/api/v1/runs/42 -H "Authorization: Bearer $KEY"      # state, waiting_for, question, result
+curl -X POST http://localhost:8000/api/v1/runs/42/answer -H "Authorization: Bearer $KEY" \
+     -H "Content-Type: application/json" -d '{"text": "March"}'
+```
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/me` | what the key may do; runs used in the last 24 hours |
+| POST | `/api/v1/runs` | `{input, request_id}` — start a run (same `request_id` → same run) |
+| GET | `/api/v1/runs/{id}` | `state` (queued/running/waiting/completed/stopped), `waiting_for` (`answer` / `owner`), `question`, `result` |
+| POST | `/api/v1/runs/{id}/answer` | `{text}` — only for a question the agent asked |
+| POST | `/api/v1/runs/{id}/cancel` | stop the run |
+| GET/POST/DELETE | `/api-keys` | the owner's side (session): list, make (secret once), revoke |
+
+Put a rate limit in front of the server (proxy/WAF) for failed key attempts; the secret has 256 bits, but the API does not throttle.
 
 ### Connections: your own API keys (issue #2 PR6b)
 
