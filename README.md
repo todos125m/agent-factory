@@ -35,6 +35,8 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 
 ## Getting started
 
+> **Not a developer?** The step-by-step user guide (in Persian) — install, connect a model (your Claude account, an API key or a local Ollama), accounts and devices, your first agent, the API — is [`docs/USER_GUIDE.fa.md`](docs/USER_GUIDE.fa.md).
+
 ### 1. Run it locally (SQLite, nothing else needed)
 
 ```bash
