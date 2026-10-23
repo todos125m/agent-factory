@@ -435,9 +435,44 @@ function renderSetup(root){
   load();
 }
 
+/* ============================== guide: every way to connect and use it, inside the app ============================== */
+
+// Each topic is a title plus numbered steps; a step may have a line to copy. Text lives in i18n.js (guide.<topic>.<n>).
+var GUIDE = [
+  {id:'claude', open:true, steps:[{n:1, code:'claude setup-token'}, {n:2}, {n:3, code:'CLAUDE_CODE_OAUTH_TOKEN=...'}, {n:4, code:'docker compose up -d'}, {n:5, code:'claude'}, {n:6}]},
+  {id:'ollama', steps:[{n:1, code:'ollama pull qwen2.5:7b'}, {n:2}, {n:3, code:'OLLAMA_BASE_URL=http://host.docker.internal:11434'},
+    {n:4, code:'docker compose --profile ollama up -d'}, {n:5, code:'docker compose exec ollama ollama pull qwen2.5:7b'}, {n:5, code:'OLLAMA_BASE_URL=http://ollama:11434', same:true}, {n:6}, {n:7}]},
+  {id:'apikey', steps:[{n:1, code:'ANTHROPIC_API_KEY=...'}, {n:2}, {n:3}]},
+  {id:'roles', steps:[{n:1}, {n:2}, {n:3}, {n:4}]},
+  {id:'first', steps:[{n:1}, {n:2}, {n:3}, {n:4}, {n:5}]},
+  {id:'workflow', steps:[{n:1}, {n:2}, {n:3}]},
+  {id:'api', steps:[{n:1}, {n:2}, {n:3, code:'Authorization: Bearer <your key>'}, {n:4}]},
+  {id:'people', steps:[{n:1}, {n:2}, {n:3}]},
+  {id:'keep', steps:[{n:1, code:'git pull && docker compose up -d --build'}, {n:2}, {n:3}, {n:4}, {n:5, code:'docker compose logs api'}]}
+];
+
+function renderGuide(root){
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('guide.title')})));
+  var body = el('div', {class:'stack'});
+  body.appendChild(el('p', {class:'muted', text:t('guide.intro')}));
+  body.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('setup'); }}, t('guide.open_setup'))));
+  GUIDE.forEach(function(topic){
+    var d = el('details', {class:'card guide-topic'}, el('summary', {text:t('guide.' + topic.id + '.title')}));
+    if (topic.open) d.setAttribute('open', '');
+    var steps = el('div', {class:'stack'});
+    topic.steps.forEach(function(st){
+      if (!st.same) steps.appendChild(el('p', {text:t('guide.' + topic.id + '.' + st.n)}));
+      if (st.code) steps.appendChild(codeLine(st.code));
+    });
+    d.appendChild(steps);
+    body.appendChild(d);
+  });
+  root.appendChild(body);
+}
+
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','setup','inbox','projects','agents','build','workflows','workflow','benchmark','settings','observability'];
+var PAGES = ['dashboard','setup','guide','inbox','projects','agents','build','workflows','workflow','benchmark','settings','observability'];
 var root;
 
 function setNav(page){
@@ -481,6 +516,7 @@ function route(){
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'benchmark') renderBenchmark(root);
   else if (page === 'settings') renderSettings(root);
+  else if (page === 'guide') renderGuide(root);
   else if (page === 'observability') renderObservability(root);
 }
 
