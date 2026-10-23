@@ -36,7 +36,8 @@ def _ollama(base_url: str, wanted: set[str]) -> dict[str, Any]:
     return {"url": base_url, "reachable": True, "models": names, "missing": sorted(w for w in wanted if w not in have)}
 
 
-def status(db: Session, me: User) -> dict[str, Any]:
+def status(db: Session, me: User, probe_ollama: bool = False) -> dict[str, Any]:
+    """`probe_ollama`: the Guide's Ollama page asks about Ollama even when it is not the method in use (still 2 s at most)."""
     settings = settings_layers.resolve(db)
     access = settings.get("model_access")
     models = {role: {"provider": cfg.get("provider"), "model": cfg.get("model")} for role, cfg in settings["models"].items()}
@@ -55,7 +56,7 @@ def status(db: Session, me: User) -> dict[str, Any]:
             "ollama": None,
         },
     }
-    if access == "ollama":
+    if access == "ollama" or probe_ollama:
         wanted = {cfg["model"] for cfg in models.values() if cfg.get("provider") == "ollama" and cfg.get("model")}
         out["model"]["ollama"] = _ollama((os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/"), wanted)
     return out

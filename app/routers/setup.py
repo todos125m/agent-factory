@@ -16,8 +16,8 @@ router = APIRouter(prefix="/setup", tags=["setup"])
 
 
 @router.get("/status")
-def status(db: Session = Depends(get_session), me: User = Depends(current_user)) -> dict[str, Any]:
-    return setup.status(db, me)
+def status(probe: str | None = None, db: Session = Depends(get_session), me: User = Depends(current_user)) -> dict[str, Any]:
+    return setup.status(db, me, probe_ollama=probe == "ollama")
 
 
 @router.post("/test-model")
