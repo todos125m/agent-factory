@@ -95,6 +95,10 @@ API = {
         lambda c, x, v: send(c, "POST", "/factory/sessions", {"title": v, "request_id": f"title-{len(v)}"}), "title"),
     ("factory_requests", "request_id"): (
         lambda c, x, v: send(c, "POST", "/factory/sessions", {"request_id": v}), "request_id"),
+    ("workflows", "name"): (
+        lambda c, x, v: send(c, "POST", "/workflows", {"name": v, "request_id": f"wfname-{len(v):06d}"}), "name"),
+    ("workflows", "request_id"): (
+        lambda c, x, v: send(c, "POST", "/workflows", {"name": "n", "request_id": v}), "request_id"),
     ("agents", "name"): (
         lambda c, x, v: send(c, "POST", "/agents", {
             "name": v, "description": "d", "model_role": "research", "capabilities": ["column-limits-audit"]}),
@@ -360,6 +364,7 @@ def test_every_integer_column_is_accounted_for():
         ("runs", "agent_version"), ("runs", "steps_used"), ("runs", "tool_calls"), ("runs", "failures"),  # <= limits
         ("run_steps", "n"), ("tool_executions", "step_n"),
         ("agent_versions", "version"), ("agent_versions", "blueprint_version"), ("evaluations", "round"),
+        ("workflows", "revision"), ("workflow_versions", "version"),  # counted by the code, one per saved change
     }
     integers = {
         (table.name, column.name)

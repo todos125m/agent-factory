@@ -295,10 +295,11 @@ function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(
 
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','inbox','projects','agents','build','benchmark','settings','observability'];
+var PAGES = ['dashboard','inbox','projects','agents','build','workflows','workflow','benchmark','settings','observability'];
 var root;
 
 function setNav(page){
+  if (page === 'workflow') page = 'workflows';
   document.querySelectorAll('.nav-item').forEach(function(b){
     b.classList.toggle('active', b.dataset.page === page);
   });
@@ -328,6 +329,8 @@ function route(){
   else if (page === 'agents' && parts[1] === 'new') startBuild(root);
   else if (page === 'agents' && parts[1] === 'blueprint') renderAgentIntake(root);
   else if (page === 'build' && parts[1]) renderBuild(root, Number(parts[1]));
+  else if (page === 'workflows') renderWorkflowsList(root);
+  else if (page === 'workflow' && parts[1]) renderWorkflow(root, Number(parts[1]));
   else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'benchmark') renderBenchmark(root);
@@ -1908,6 +1911,352 @@ function renderBuild(root, id){
     body.appendChild(actions());
   }
 
+  load();
+}
+
+/* ============================== workflows (app/workflow.py) ============================== */
+
+function renderWorkflowsList(root){
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('workflows.title')})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+  var name = el('input', {type:'text', maxlength:'100', placeholder:t('workflows.name_placeholder'), 'aria-label':t('workflows.name_placeholder')});
+  var status = el('p', {class:'err muted', role:'status'});
+  var create = el('button', {class:'btn', text:t('workflows.create')});
+  create.addEventListener('click', function(){
+    if (!name.value.trim()) return;
+    create.disabled = true;
+    api('/workflows', {method:'POST', json:{name: name.value.trim(), request_id: newRequestId()}})
+      .then(function(w){ go('workflow/' + w.id); })
+      .catch(function(e){ status.textContent = e.message; create.disabled = false; });
+  });
+  body.appendChild(el('div', {class:'card stack'}, el('div', {class:'row'}, name, create), status));
+  var list = el('div', {class:'list'});
+  body.appendChild(list);
+  list.appendChild(loadingBox());
+  api('/workflows').then(function(rows){
+    clear(list);
+    if (!rows.length){ list.appendChild(emptyBox('🔗', t('workflows.empty_title'), t('workflows.empty_sub'))); return; }
+    rows.forEach(function(w){
+      list.appendChild(el('button', {class:'list-item', onclick:function(){ go('workflow/' + w.id); }},
+        el('div', {class:'top'}, el('b', {text:w.name}),
+          w.approved_version ? el('span', {class:'chip status-COMPLETED', text:t('workflows.row_approved', {version: fmtNum(w.approved_version)})}) : null),
+        el('small', {class:'muted', text:t('workflows.row', {agents: fmtNum(w.agents), version: fmtNum(w.version)})})));
+    });
+  }).catch(function(e){ clear(list); list.appendChild(errorBox(e.message)); });
+}
+
+function renderWorkflow(root, id){
+  root.appendChild(el('div', {class:'page-head'},
+    el('button', {class:'btn ghost sm', onclick:function(){ go('workflows'); }}, t('workflows.back')),
+    el('h2', {id:'wf-title', text:t('workflows.title')})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+  var wf = null, nodes = [], edges = [], pos = {}, dirty = false, nextId = 1, selected = null;
+  var NS = 'http://www.w3.org/2000/svg';
+  var NODE_W = 200, NODE_H = 76;
+
+  function svgEl(tag, attrs, text){
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function load(){
+    clear(body); body.appendChild(loadingBox());
+    api('/workflows/' + id).then(adopt).catch(function(e){ clear(body); body.appendChild(errorBox(e.message, load)); });
+  }
+  function adopt(next){
+    wf = next; nodes = JSON.parse(JSON.stringify(wf.nodes)); edges = JSON.parse(JSON.stringify(wf.edges));
+    pos = JSON.parse(JSON.stringify(wf.layout || {})); dirty = false; draw();
+  }
+  function issueText(i){
+    var p = {node:'', edge:'', agent:'', version:'', kind:'', source:'', target:'', have:'', want:'', field:'', tool:'', permission:'', role:''};
+    for (var k in i) if (k !== 'code' && k !== 'nodes' && i[k] !== null && i[k] !== undefined) p[k] = String(i[k]);
+    p.nodes = (i.nodes || []).join(', ');
+    return t('wfissue.' + i.code, p);
+  }
+  function nodeLabel(n){
+    if (n.type === 'agent') return n.title || n.agent || n.id;
+    return n.role || n.tool || n.source || n.id;
+  }
+  function freshId(prefix){
+    while (nodes.some(function(n){ return n.id === prefix + nextId; }) || edges.some(function(e){ return e.id === prefix + nextId; })) nextId++;
+    return prefix + (nextId++);
+  }
+  function changed(){ dirty = true; draw(); }
+
+  // ----- where nodes sit: auto layout by dependency depth, unless the owner placed them -----
+  function place(){
+    var depth = {};
+    nodes.forEach(function(n){ depth[n.id] = 0; });
+    for (var pass = 0; pass < nodes.length; pass++){
+      edges.forEach(function(e){
+        if (depth[e.from.node] === undefined || depth[e.to.node] === undefined) return;
+        if (depth[e.to.node] < depth[e.from.node] + 1 && pass < nodes.length) depth[e.to.node] = depth[e.from.node] + 1;
+      });
+    }
+    var rows = {};
+    nodes.forEach(function(n){
+      if (pos[n.id]) return;
+      var d = depth[n.id] || 0; rows[d] = (rows[d] || 0) + 1;
+      pos[n.id] = {x: 40 + d * 280, y: 40 + (rows[d] - 1) * 110};
+    });
+  }
+  var saveLayoutTimer = null;
+  function saveLayout(){
+    clearTimeout(saveLayoutTimer);
+    saveLayoutTimer = setTimeout(function(){
+      api('/workflows/' + id + '/layout', {method:'PUT', json:{positions: pos}}).catch(function(){});
+    }, 500);
+  }
+
+  function portPoint(n, side){
+    var p = pos[n.id];
+    return {x: p.x + (side === 'out' ? NODE_W : 0), y: p.y + NODE_H / 2};
+  }
+  function canvas(){
+    place();
+    var maxX = 600, maxY = 300;
+    nodes.forEach(function(n){ maxX = Math.max(maxX, pos[n.id].x + NODE_W + 40); maxY = Math.max(maxY, pos[n.id].y + NODE_H + 40); });
+    var svg = svgEl('svg', {class:'canvas wf-canvas', role:'group', 'aria-label':t('workflow.canvas_label'), viewBox:'0 0 ' + maxX + ' ' + maxY});
+    var byId = {}; nodes.forEach(function(n){ byId[n.id] = n; });
+    var bad = {};
+    (wf.issues || []).forEach(function(i){ if (i.node) bad[i.node] = true; if (i.edge) bad[i.edge] = true; (i.nodes || []).forEach(function(x){ bad[x] = true; }); });
+    var layer = svgEl('g', {});
+    edges.forEach(function(e){
+      var a = byId[e.from.node], b = byId[e.to.node];
+      if (!a || !b) return;
+      var p = portPoint(a, 'out'), q = portPoint(b, 'in'), dx = Math.max(60, Math.abs(q.x - p.x) / 2);
+      var path = svgEl('path', {class:'edge wfk-' + e.kind + (bad[e.id] ? ' incomplete' : ' confirmed') + (selected === e.id ? ' picked' : ''),
+        d:'M' + p.x + ',' + p.y + ' C' + (p.x + dx) + ',' + p.y + ' ' + (q.x - dx) + ',' + q.y + ' ' + q.x + ',' + q.y, 'marker-end':'url(#wf-arrow)'});
+      layer.appendChild(path);
+      var text = lbl('wfkind', e.kind) + (e.mapping && e.mapping.length ? ': ' + e.mapping.map(function(m){ return lbl('wffield', m.source) + '→' + lbl('wffield', m.target); }).join(', ') : '');
+      layer.appendChild(svgEl('text', {x:(p.x + q.x) / 2, y:(p.y + q.y) / 2 - 8, 'text-anchor':'middle', class:'small'}, text));
+    });
+    var defs = svgEl('defs', {});
+    var marker = svgEl('marker', {id:'wf-arrow', viewBox:'0 0 10 10', refX:'9', refY:'5', markerWidth:'7', markerHeight:'7', orient:'auto-start-reverse'});
+    marker.appendChild(svgEl('path', {d:'M0,0 L10,5 L0,10 z', fill:'currentColor'}));
+    defs.appendChild(marker); svg.appendChild(defs); svg.appendChild(layer);
+    nodes.forEach(function(n){
+      var p = pos[n.id];
+      var g = svgEl('g', {class:'node wfn-' + n.type + (bad[n.id] ? ' incomplete' : ' confirmed') + (selected === n.id ? ' selected' : ''),
+        tabindex:'0', role:'button', 'aria-label': lbl('wfnode', n.type) + ': ' + nodeLabel(n) + (bad[n.id] ? ' ⚠' : ''),
+        transform:'translate(' + p.x + ',' + p.y + ')'});
+      g.appendChild(svgEl('rect', {width:NODE_W, height:NODE_H, rx:'14'}));
+      g.appendChild(svgEl('text', {x:NODE_W / 2, y:'30', 'text-anchor':'middle'}, (bad[n.id] ? '⚠ ' : '') + nodeLabel(n).slice(0, 22)));
+      g.appendChild(svgEl('text', {x:NODE_W / 2, y:'54', 'text-anchor':'middle', class:'small'},
+        lbl('wfnode', n.type) + (n.type === 'agent' && n.version ? ' · v' + n.version : '')));
+      g.appendChild(svgEl('circle', {class:'port', cx:NODE_W, cy:NODE_H / 2, r:'6'}));
+      if (n.type === 'agent') g.appendChild(svgEl('circle', {class:'port', cx:'0', cy:NODE_H / 2, r:'6'}));
+      // Moving a node: a pointer drag or the arrow keys. Only its place changes (no version, no approval).
+      var start = null;
+      g.addEventListener('pointerdown', function(ev){
+        var k = svg.viewBox.baseVal.width / svg.getBoundingClientRect().width;
+        start = {x: ev.clientX, y: ev.clientY, px: p.x, py: p.y, k: k, moved: false}; g.setPointerCapture(ev.pointerId);
+      });
+      g.addEventListener('pointermove', function(ev){
+        if (!start) return;
+        var dx = (ev.clientX - start.x) * start.k, dy = (ev.clientY - start.y) * start.k;
+        if (Math.abs(dx) + Math.abs(dy) > 3) start.moved = true;
+        pos[n.id] = {x: Math.max(0, Math.round(start.px + dx)), y: Math.max(0, Math.round(start.py + dy))};
+        g.setAttribute('transform', 'translate(' + pos[n.id].x + ',' + pos[n.id].y + ')');
+      });
+      g.addEventListener('pointerup', function(){
+        if (start && start.moved) saveLayout(); else { selected = n.id; draw(); }
+        start = null;
+      });
+      g.addEventListener('keydown', function(ev){
+        var step = ev.shiftKey ? 40 : 10, d = {ArrowLeft:[-step, 0], ArrowRight:[step, 0], ArrowUp:[0, -step], ArrowDown:[0, step]}[ev.key];
+        if (d){ ev.preventDefault(); pos[n.id] = {x: Math.max(0, p.x + d[0]), y: Math.max(0, p.y + d[1])}; saveLayout(); draw(); }
+        else if (ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); selected = n.id; draw(); }
+      });
+      svg.appendChild(g);
+    });
+    return el('div', {class:'card canvas-card wf-canvas-card'}, svg);
+  }
+
+  // ----- the node list: the keyboard- and phone-friendly way to do everything the canvas shows -----
+  function addNode(type){
+    var id = freshId(type === 'agent' ? 'a' : type[0]);
+    var n = {id: id, type: type};
+    if (type === 'model') n.role = wf.catalog.roles[0];
+    if (type === 'tool') n.tool = wf.catalog.tools[0];
+    if (type === 'source') n.source = wf.catalog.sources[0];
+    if (type === 'agent'){ var a = wf.catalog.agents[0]; if (a){ n.agent = a.name; n.version = a.version; } n.task = ''; }
+    nodes.push(n); changed();
+  }
+  function removeNode(n){
+    nodes = nodes.filter(function(x){ return x.id !== n.id; });
+    edges = edges.filter(function(e){ return e.from.node !== n.id && e.to.node !== n.id; });
+    delete pos[n.id]; changed();
+  }
+  function nodeCard(n){
+    var card = el('div', {class:'card stack wf-node' + (selected === n.id ? ' selected' : '')},
+      el('div', {class:'row', style:'justify-content:space-between'},
+        el('b', {text: lbl('wfnode', n.type) + ' · ' + n.id}),
+        el('button', {class:'btn ghost sm', onclick:function(){ removeNode(n); }}, t('workflow.remove'))));
+    if (n.type === 'agent'){
+      var pick = el('select', {'aria-label': lbl('wfnode', 'agent')});
+      pick.appendChild(el('option', {value:''}, t('workflow.pick_agent')));
+      wf.catalog.agents.forEach(function(a){
+        pick.appendChild(el('option', {value: a.name + '@' + a.version}, a.name + ' · v' + a.version + (a.state !== 'registry' ? ' (' + lbl('vstate', a.state) + ')' : '')));
+      });
+      pick.value = n.agent ? n.agent + '@' + n.version : '';
+      pick.addEventListener('change', function(){
+        var parts = pick.value.split('@'); n.agent = parts[0] || null; n.version = parts[1] ? Number(parts[1]) : null; changed();
+      });
+      var task = el('textarea', {rows:'2', maxlength:'1000', placeholder:t('workflow.task_placeholder'), 'aria-label':t('workflow.task_placeholder')});
+      task.value = n.task || '';
+      task.addEventListener('input', function(){ n.task = task.value; dirty = true; });
+      task.addEventListener('change', changed);
+      card.appendChild(pick); card.appendChild(task);
+    } else {
+      var key = {model:'role', tool:'tool', source:'source'}[n.type];
+      var options = {model:wf.catalog.roles, tool:wf.catalog.tools, source:wf.catalog.sources}[n.type];
+      var sel = el('select', {'aria-label': lbl('wfnode', n.type)});
+      options.forEach(function(o){ sel.appendChild(el('option', {value:o}, n.type === 'tool' ? lbl('dchoice', o) : (n.type === 'model' ? lbl('role', o) : o))); });
+      sel.value = n[key];
+      sel.addEventListener('change', function(){ n[key] = sel.value; changed(); });
+      card.appendChild(sel);
+    }
+    return card;
+  }
+
+  // ----- connect: pick the two nodes; the kind follows from their types; a data edge needs its mapping -----
+  function connectForm(){
+    var from = el('select', {'aria-label':t('workflow.from')}), to = el('select', {'aria-label':t('workflow.to')});
+    nodes.forEach(function(n){
+      from.appendChild(el('option', {value:n.id}, nodeLabel(n) + ' (' + n.id + ')'));
+      if (n.type === 'agent') to.appendChild(el('option', {value:n.id}, nodeLabel(n) + ' (' + n.id + ')'));
+    });
+    var src = el('select', {'aria-label':t('workflow.map_from')}), dst = el('select', {'aria-label':t('workflow.map_to')});
+    Object.keys(wf.catalog.output_fields).forEach(function(f){ src.appendChild(el('option', {value:f}, lbl('wffield', f))); });
+    Object.keys(wf.catalog.input_fields).forEach(function(f){ dst.appendChild(el('option', {value:f}, lbl('wffield', f))); });
+    var joinBox = el('input', {type:'checkbox', id:'wf-join'});
+    var joinLabel = el('label', {class:'inline', for:'wf-join'}, joinBox, ' ' + t('workflow.map_join'));
+    var mapRow = el('div', {class:'row'}, el('span', {text:t('workflow.map_from')}), src, el('span', {text:t('workflow.map_to')}), dst, joinLabel);
+    var kindChip = el('span', {class:'chip'});
+    function sync(){
+      var a = nodes.filter(function(n){ return n.id === from.value; })[0];
+      var kind = a ? ({agent:'data', model:'model', tool:'tool', source:'knowledge'}[a.type]) : '';
+      kindChip.textContent = t('workflow.kind') + ': ' + (kind ? lbl('wfkind', kind) : '—');
+      mapRow.hidden = kind !== 'data';
+      joinLabel.hidden = !(wf.catalog.output_fields[src.value] === 'list' && wf.catalog.input_fields[dst.value] === 'text');
+      if (joinLabel.hidden) joinBox.checked = false;
+    }
+    [from, src, dst].forEach(function(s){ s.addEventListener('change', sync); });
+    sync();
+    var add = el('button', {class:'btn sm', text:t('workflow.connect')});
+    add.addEventListener('click', function(){
+      var a = nodes.filter(function(n){ return n.id === from.value; })[0];
+      if (!a || !to.value) return;
+      var kind = {agent:'data', model:'model', tool:'tool', source:'knowledge'}[a.type];
+      var port = {data:['result', 'input'], model:['out', 'model'], tool:['out', 'tools'], knowledge:['out', 'knowledge']}[kind];
+      var e = {id: freshId('e'), kind: kind, from:{node:a.id, port:port[0]}, to:{node:to.value, port:port[1]}, mapping: []};
+      if (kind === 'data'){
+        var m = {source: src.value, target: dst.value};
+        if (joinBox.checked) m.convert = 'join';
+        e.mapping.push(m);
+      }
+      edges.push(e); changed();
+    });
+    return el('div', {class:'card stack'}, el('b', {text:t('workflow.connect')}),
+      el('div', {class:'row'}, el('span', {text:t('workflow.from')}), from, el('span', {text:t('workflow.to')}), to, kindChip),
+      mapRow, el('div', {class:'btn-row'}, add));
+  }
+  function edgeList(){
+    var box = el('div', {class:'card stack'}, el('b', {text:t('workflow.edges')}));
+    if (!edges.length) box.appendChild(el('p', {class:'muted', text:t('workflow.no_edges')}));
+    var byId = {}; nodes.forEach(function(n){ byId[n.id] = n; });
+    edges.forEach(function(e){
+      var a = byId[e.from.node], b = byId[e.to.node];
+      var map = (e.mapping || []).map(function(m){ return lbl('wffield', m.source) + ' → ' + lbl('wffield', m.target) + (m.convert ? ' (' + t('workflow.map_join') + ')' : ''); }).join(', ');
+      box.appendChild(el('div', {class:'row', style:'justify-content:space-between'},
+        el('span', {}, el('span', {class:'chip wfk-' + e.kind, text:lbl('wfkind', e.kind)}), ' ' + (a ? nodeLabel(a) : '?') + ' → ' + (b ? nodeLabel(b) : '?') + (map ? ' · ' + map : '')),
+        el('button', {class:'btn ghost sm', onclick:function(){ edges = edges.filter(function(x){ return x.id !== e.id; }); changed(); }}, t('workflow.remove'))));
+    });
+    return box;
+  }
+
+  // ----- save / approve / run: three separate things -----
+  function send(path, method, payload, status){
+    return api('/workflows/' + id + path, {method: method, json: payload})
+      .then(adopt)
+      .catch(function(e){
+        if (e.code === 'stale_revision' || e.code === 'stale_version'){ notify(t('build.stale')); load(); return; }
+        if (e.code === 'workflow_invalid'){ load(); return; }
+        status.textContent = e.message;
+      });
+  }
+  function actions(){
+    var status = el('p', {class:'err muted', role:'status'});
+    var save = el('button', {class:'btn', text:t('workflow.save')});
+    save.addEventListener('click', function(){
+      save.disabled = true;
+      send('/draft', 'PUT', {nodes: nodes, edges: edges, expected_revision: wf.revision, request_id: newRequestId()}, status)
+        .then(function(){ save.disabled = false; });
+    });
+    var row = el('div', {class:'btn-row'}, save);
+    if (dirty) row.appendChild(el('span', {class:'chip risk-medium', text:t('workflow.unsaved')}));
+    if (!dirty && !wf.approved){
+      var ok = el('button', {class:'btn', text:t('workflow.approve', {version: fmtNum(wf.version)}), disabled: wf.can_approve ? null : 'disabled'});
+      ok.addEventListener('click', function(){
+        ok.disabled = true;
+        send('/approve', 'POST', {version: wf.version, expected_revision: wf.revision, request_id: newRequestId()}, status);
+      });
+      row.appendChild(ok);
+    }
+    if (wf.approved) row.appendChild(el('span', {class:'chip status-COMPLETED', text:t('workflow.approved_chip', {version: fmtNum(wf.version)})}));
+    var card = el('div', {class:'card stack'}, el('p', {class:'muted', text:t('workflow.saved_hint')}), row, status);
+    if (!dirty && wf.approved) card.appendChild(runBox());
+    return card;
+  }
+  function runBox(){
+    var box = el('div', {class:'stack'}, el('b', {text:t('workflow.run')}), el('p', {class:'muted', text:t('workflow.run_help')}));
+    var status = el('p', {class:'err muted', role:'status'});
+    var pick = el('select', {'aria-label':t('workflow.run')});
+    var go_ = el('button', {class:'btn', text:t('workflow.run'), disabled:'disabled'});
+    api('/projects').then(function(ps){
+      if (!ps.length){ box.insertBefore(el('p', {class:'muted', text:t('workflow.no_projects')}), status); return; }
+      ps.forEach(function(p){ pick.appendChild(el('option', {value:String(p.id)}, p.title)); });
+      go_.disabled = false;
+    });
+    go_.addEventListener('click', function(){
+      go_.disabled = true; status.textContent = '';
+      api('/workflows/' + id + '/run', {method:'POST', json:{version: wf.version, project_id: Number(pick.value), request_id: newRequestId()}})
+        .then(function(r){ notify(t('workflow.run_done', {count: fmtNum(r.task_ids.length)})); go('projects/' + pick.value); })
+        .catch(function(e){ status.textContent = e.message; go_.disabled = false; });
+    });
+    box.appendChild(el('div', {class:'row'}, pick, go_)); box.appendChild(status);
+    return box;
+  }
+
+  function draw(){
+    clear(body);
+    var title = document.getElementById('wf-title'); if (title) title.textContent = wf.name;
+    body.appendChild(el('p', {class:'muted', text:t('workflow.version', {version: fmtNum(wf.version)})}));
+    body.appendChild(el('div', {class:'btn-row'},
+      [['agent', t('workflow.add_agent')], ['model', t('workflow.add_model')], ['tool', t('workflow.add_tool')], ['source', t('workflow.add_source')]].map(function(pair){
+        return el('button', {class:'btn ghost sm', onclick:function(){ addNode(pair[0]); }}, pair[1]);
+      })));
+    body.appendChild(canvas());
+    body.appendChild(el('p', {class:'muted wf-mobile-hint', text:t('workflow.mobile_hint')}));
+    if (wf.issues && wf.issues.length && !dirty){
+      body.appendChild(el('div', {class:'card stack', role:'status'}, el('b', {text:t('workflow.issues')}),
+        wf.issues.map(function(i){ return el('p', {class:'issue', text:'⚠ ' + issueText(i)}); })));
+    }
+    var list = el('div', {class:'stack'});
+    nodes.forEach(function(n){ list.appendChild(nodeCard(n)); });
+    body.appendChild(list);
+    if (nodes.length && nodes.some(function(n){ return n.type === 'agent'; })) body.appendChild(connectForm());
+    body.appendChild(edgeList());
+    body.appendChild(actions());
+    if ((wf.history || []).length > 1){
+      body.appendChild(el('p', {class:'muted'}, el('b', {text:t('workflow.history') + ': '}),
+        wf.history.map(function(v){ return 'v' + v.version + (v.approved ? ' ✓' : ''); }).join(' · ')));
+    }
+  }
   load();
 }
 

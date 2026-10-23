@@ -63,6 +63,12 @@ def task_context(
         f"Project goal: {task.project.goal}",
         f"Task: {task.title}\nInput: {json.dumps(task.input, ensure_ascii=False, sort_keys=True)}",
     ]
+    if (task.input or {}).get("mappings"):
+        from app import workflow  # local: app.workflow builds on app.manager
+
+        if mapped := workflow.mapped_inputs(session, task):
+            sections.append("Inputs mapped from earlier tasks:\n" + "\n".join(
+                f"- {name}: {_truncate(value, max_chars // 4)}" for name, value in sorted(mapped.items())))
     if language := preferences.reply_language_line(session, task.project, settings["output_locale"]):
         sections.append(language)
     if extra:

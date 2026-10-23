@@ -225,6 +225,13 @@ def _propose_plan(session: Session, gateway: Gateway, project: Project, feedback
     return plan
 
 
+def stage_plan(session: Session, project: Project, plan: PlanIn, max_steps: int) -> dict[str, Any]:
+    """A plan made by something other than the manager's model (a workflow, app/workflow.py): checked as a DAG, staged
+    exactly like the manager's own, awaiting the owner's approval. The caller commits."""
+    _validate_dag(plan.steps, max_steps)
+    return _add_plan(session, project, plan)
+
+
 def create_plan(session: Session, gateway: Gateway, project: Project) -> dict[str, Any]:
     ensure_active(session, project, "plan")
     result = _add_plan(session, project, _propose_plan(session, gateway, project, None))
