@@ -33,60 +33,17 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | Human-guided factory (Issue #2) | All seven PRs + hardening: fa/en/tr UI and settings axes, sign-in, versioned brief and approvals, blueprint canvas, bounded runs with workers, build → evaluate → activate with rollback, typed workflows, encrypted provider keys, external API with scoped keys. Details below and in `docs/HUMAN_GUIDED_FACTORY.md` | ✅ |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
-## Getting started
-
-> **Not a developer?** The step-by-step user guide (in Persian) — install, connect a model (your Claude account, an API key or a local Ollama), accounts and devices, your first agent, the API — is [`docs/USER_GUIDE.fa.md`](docs/USER_GUIDE.fa.md).
-
-### 1. Run it locally (SQLite, nothing else needed)
+## Run locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"            # re-run after pulling: new dependencies (cryptography) arrive this way
-uvicorn app.main:app --reload      # API docs: http://localhost:8000/docs   UI: http://localhost:8000/app
-pytest                             # 1100+ tests, none of them calls a real model
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+uvicorn app.main:app --reload     # UI: http://localhost:8000/app   API docs: http://localhost:8000/docs
+pytest
 ```
 
-The database is created and migrated on startup (`agent_factory.db` next to where you run it). Python 3.11 or newer.
-**Locally the app reads real environment variables, not the `.env` file** (only `docker compose` reads `.env`): set what
-you need in the shell before `uvicorn`, e.g. `export AGENT_FACTORY_SECRET_KEY=...` (PowerShell:
-`$env:AGENT_FACTORY_SECRET_KEY = "..."`). Every setting has a safe default, so nothing is needed for a first look.
-
-### 2. First run, in the UI (`/app`)
-
-1. Open `/app`. The first visitor gets the server's first account — the **admin** (no sign-up step). Pick the language
-   (فارسی / English / Türkçe); it can be changed any time in Settings.
-2. **Give it a model** (Settings → models, or `.env`): the default `model_access` is `claude_account` (your own Claude
-   subscription via the Claude Code CLI: run `claude` once and log in); or set `ANTHROPIC_API_KEY` for `api_key`; or
-   run Ollama locally. Nothing paid happens until you press a button that says it will call a model.
-3. **Optional — keep a provider key in the app:** Settings → Connections needs `AGENT_FACTORY_SECRET_KEY` first (see the
-   table below); otherwise the page says "keys can't be kept" and tells you why.
-4. Build your first agent: **Agents → New agent** (interview → brief → design canvas → Build → Evaluate → Activate).
-   Connect agents on **Workflows**; let a program call one through **Settings → API keys**.
-
-### 3. Settings that matter (environment variables — in `.env` for Docker; `.env.example` lists them all)
-
-| Variable | Needed for | Notes |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL | unset = SQLite. `pip install -e ".[postgres]"` first |
-| `AGENT_FACTORY_SECRET_KEY` | keeping provider keys (Settings → Connections) | ≥32 characters, ≥12 different; generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. **Back it up**: without it stored keys can't be read |
-| `AGENT_FACTORY_WORKERS` | step-by-step runs | threads inside the app (default 1). `0` + `python -m app.worker` to run them as a separate process |
-| `AGENT_FACTORY_OWNER_TOKEN` | taking over an account made before sign-in existed, from anywhere but the server itself | optional |
-| `AGENT_FACTORY_BEHIND_PROXY=1` | **set it whenever a reverse proxy / load balancer fronts the server** | turns the "claim from this machine" shortcut off and makes the cookie always `Secure` |
-| `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY` | the model access you chose | see "Model access" |
-
-### 4. Production notes
-
-- Use PostgreSQL 16 and HTTPS. Behind a proxy set `AGENT_FACTORY_BEHIND_PROXY=1` and limit request rates there too (the app throttles
-  failed API-key attempts itself, per process only).
-- Update = pull, `pip install -e ".[postgres,anthropic]"`, restart: migrations run at startup (idempotent).
-- Changing `AGENT_FACTORY_SECRET_KEY`: put the new one in it and the old one in `AGENT_FACTORY_SECRET_KEY_PREVIOUS`, run
-  `python -m app.credentials rotate`, then empty the old one.
-- Troubleshooting: *"keys can't be kept"* → set the secret / `pip install -e .`; *runs stay "queued"* → workers are off
-  (`AGENT_FACTORY_WORKERS=0` without a separate `python -m app.worker`), or the project is paused; *a tool waits* → open the
-  decision inbox, it is waiting for you by design.
-
-The UI is an installable PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gives it its own icon.
+SQLite by default; set `DATABASE_URL` for PostgreSQL. The app reads real environment variables (not `.env`; see `.env.example`
+for the list). The first visitor of a server gets its first account, the admin.
 
 ### SQLite vs PostgreSQL: what a column refuses
 
@@ -106,26 +63,11 @@ Migrations (Alembic) keep the schema in step; `app/db.py::ensure_column_lengths`
 ## Run with Docker
 
 ```bash
-docker compose up --build        # or:  ./start.sh   (Windows: .\start.ps1) — also waits and opens the browser
-# UI: http://localhost:8000/app    API docs: http://localhost:8000/docs
+docker compose up --build        # UI: http://localhost:8000/app
 ```
 
-**No setup:** no `.env` is needed. The compose file starts the API and a `postgres:16` (own volume, healthcheck, restarts
-itself), the master secret that encrypts provider keys is **made on the first start and kept in the data volume**
-(`af_data`; `AGENT_FACTORY_SECRET_KEY` in `.env` wins if you set it), migrations run at startup, and workers run inside the
-API service. The web port is published on `127.0.0.1` only (set `AGENT_FACTORY_BIND=0.0.0.0` to reach it from your network,
-after putting HTTPS in front); the database is not published at all.
-
-- **Model access:** put `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` in `.env`, or use an
-  Ollama installed on this machine (`OLLAMA_BASE_URL=http://host.docker.internal:11434`), or `docker compose --profile ollama up`.
-- **Back up the volumes** `postgres_data` and `af_data` (the secret). `docker compose down` keeps them; `down -v` deletes them.
-- **More workers:** `AGENT_FACTORY_WORKERS=0` in `.env`, then `docker compose --profile workers up -d --scale worker=2`.
-- **Docker Hub answers 403** (it blocks some countries): `PYTHON_IMAGE=mirror.gcr.io/library/python:3.11-slim` and
-  `POSTGRES_IMAGE=mirror.gcr.io/library/postgres:16` in `.env` (checked to work).
-- **`CERTIFICATE_VERIFY_FAILED` while building** (an antivirus or company proxy inspects HTTPS, e.g. AVG/Avast Web Shield): put
-  its root certificate in `docker/ca/` (see `docker/ca/README.md`) or switch off HTTPS scanning while building.
-- A browser outside the container is not "this machine": an account from before sign-in existed is taken over with
-  `AGENT_FACTORY_OWNER_TOKEN`. Behind a reverse proxy set `AGENT_FACTORY_BEHIND_PROXY=1`.
+No `.env` is needed; the variables it may hold are in `.env.example`. The master secret for stored provider keys is made on
+the first start and kept in the data volume.
 
 ## Phase 1 API
 

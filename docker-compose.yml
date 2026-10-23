@@ -38,7 +38,7 @@ services:
       - af_data:/data   # the master secret made on first start lives here (see docker/entrypoint.sh)
     ports:
       # This machine only, by default. To reach it from your phone or network set AGENT_FACTORY_BIND=0.0.0.0 in .env
-      # (and put HTTPS in front before exposing it to the internet; see docs/USER_GUIDE.fa.md).
+      # (and put HTTPS in front before exposing it to the internet).
       - "${AGENT_FACTORY_BIND:-127.0.0.1}:${AGENT_FACTORY_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach an Ollama installed on this machine: http://host.docker.internal:11434

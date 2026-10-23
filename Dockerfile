@@ -8,7 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Extra root certificates (docker/ca/README.md): for a machine whose antivirus or proxy inspects HTTPS.
+# Extra root certificates (drop a *.crt in docker/ca/): for a machine whose antivirus or proxy inspects HTTPS.
 COPY docker/ca/ /usr/local/share/ca-certificates/extra/
 RUN update-ca-certificates
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
