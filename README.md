@@ -106,18 +106,26 @@ Migrations (Alembic) keep the schema in step; `app/db.py::ensure_column_lengths`
 ## Run with Docker
 
 ```bash
-cp .env.example .env
-# edit .env: at least AGENT_FACTORY_SECRET_KEY (to keep provider keys) and your model access (CLAUDE_CODE_OAUTH_TOKEN
-# or ANTHROPIC_API_KEY); keep DATABASE_URL pointing at the "postgres" service
-docker compose up --build
+docker compose up --build        # or:  ./start.sh   (Windows: .\start.ps1) — also waits and opens the browser
 # UI: http://localhost:8000/app    API docs: http://localhost:8000/docs
 ```
 
-Starts the API and a `postgres:16` container together (persisted volume, healthcheck). The database is published on
-`127.0.0.1` only; the API on port 8000. The `api` service reads everything from `.env` (workers run inside it; see
-`AGENT_FACTORY_WORKERS`). Migrations run at startup. Put HTTPS and a reverse proxy in front before exposing it, and set
-`AGENT_FACTORY_BEHIND_PROXY=1` when you do. A browser outside the container is not "this machine": an account from before
-sign-in existed is taken over with `AGENT_FACTORY_OWNER_TOKEN`.
+**No setup:** no `.env` is needed. The compose file starts the API and a `postgres:16` (own volume, healthcheck, restarts
+itself), the master secret that encrypts provider keys is **made on the first start and kept in the data volume**
+(`af_data`; `AGENT_FACTORY_SECRET_KEY` in `.env` wins if you set it), migrations run at startup, and workers run inside the
+API service. The web port is published on `127.0.0.1` only (set `AGENT_FACTORY_BIND=0.0.0.0` to reach it from your network,
+after putting HTTPS in front); the database is not published at all.
+
+- **Model access:** put `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` in `.env`, or use an
+  Ollama installed on this machine (`OLLAMA_BASE_URL=http://host.docker.internal:11434`), or `docker compose --profile ollama up`.
+- **Back up the volumes** `postgres_data` and `af_data` (the secret). `docker compose down` keeps them; `down -v` deletes them.
+- **More workers:** `AGENT_FACTORY_WORKERS=0` in `.env`, then `docker compose --profile workers up -d --scale worker=2`.
+- **Docker Hub answers 403** (it blocks some countries): `PYTHON_IMAGE=mirror.gcr.io/library/python:3.11-slim` and
+  `POSTGRES_IMAGE=mirror.gcr.io/library/postgres:16` in `.env` (checked to work).
+- **`CERTIFICATE_VERIFY_FAILED` while building** (an antivirus or company proxy inspects HTTPS, e.g. AVG/Avast Web Shield): put
+  its root certificate in `docker/ca/` (see `docker/ca/README.md`) or switch off HTTPS scanning while building.
+- A browser outside the container is not "this machine": an account from before sign-in existed is taken over with
+  `AGENT_FACTORY_OWNER_TOKEN`. Behind a reverse proxy set `AGENT_FACTORY_BEHIND_PROXY=1`.
 
 ## Phase 1 API
 

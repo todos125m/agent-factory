@@ -4,8 +4,7 @@
 زبان رابط فارسی است و به English و Türkçe هم عوض می‌شود.
 
 > **صادقانه:** مراحل «اجرای محلی» و بخش‌های داخل برنامه (ساخت ایجنت، workflow، کلید API) با تست و مرورگر امتحان شده‌اند.
-> مراحل **Docker از صفر**، **Ollama** و **مدل واقعی با کلید واقعی** هنوز روی یک سیستم تازه امتحان نشده‌اند؛ جای هرکدام
-> علامت ⚠️ گذاشته‌ام. اگر جایی گیر کردید، بخش «رفع اشکال» آخر را ببینید.
+> مراحل **Ollama** و **مدل واقعی با کلید واقعی** هنوز امتحان نشده‌اند؛ جای هرکدام علامت ⚠️ گذاشته‌ام. اگر جایی گیر کردید، بخش «رفع اشکال» آخر را ببینید.
 
 ---
 
@@ -23,34 +22,34 @@
 
 ## ۲. نصب و اجرا
 
-### روش الف) با Docker (پیشنهادی)
+### روش الف) با Docker (پیشنهادی — یک دستور، بدون هیچ تنظیمی)
 
 نیاز: Docker Desktop (ویندوز/مک) یا Docker Engine (لینوکس).
 
 ```bash
 git clone https://github.com/todos125m/agent-factory.git
 cd agent-factory
-cp .env.example .env        # ویندوز PowerShell:  Copy-Item .env.example .env
-```
-
-فایل `.env` را باز کنید و دست‌کم این‌ها را پر کنید:
-
-1. `AGENT_FACTORY_SECRET_KEY` — رمز اصلی برای نگه‌داری کلیدهای شما. با این دستور بسازید و بگذارید:
-   `python -c "import secrets; print(secrets.token_urlsafe(48))"`
-   **از آن پشتیبان بگیرید**؛ بدون آن، کلیدهای ذخیره‌شده خوانده نمی‌شوند.
-2. دسترسی به مدل (بخش ۴ پایین).
-
-سپس:
-
-```bash
 docker compose up --build
 ```
 
-وقتی آماده شد، در مرورگر باز کنید: **http://localhost:8000/app**
+یا به‌جای آن `./start.sh` (ویندوز: `.\start.ps1`) که صبر هم می‌کند تا آماده شود و مرورگر را باز می‌کند.
+وقتی آماده شد: **http://localhost:8000/app**
 
-⚠️ اجرای Docker از صفر روی سیستم تازه هنوز امتحان نشده. اولین ساخت چند دقیقه طول می‌کشد (دانلود پایتون و ابزار Claude).
+**چیزی لازم نیست پر کنید.** پایگاه داده (PostgreSQL) خودش بالا می‌آید، و رمز اصلی نگه‌داری کلیدها بار اول **خودکار ساخته می‌شود** و در volume به اسم
+`af_data` می‌ماند (اگر خودتان در `.env` بگذارید، آن اولویت دارد). اولین ساخت چند دقیقه طول می‌کشد (دانلود پایتون و ابزار Claude).
 
-داده‌ها در یک volume به اسم `postgres_data` می‌مانند. به‌روزرسانی: `git pull` و دوباره `docker compose up --build`.
+نکته‌ها:
+- **دسترسی:** فقط از همین سیستم باز می‌شود. برای موبایل/شبکه در `.env` بنویسید `AGENT_FACTORY_BIND=0.0.0.0` (و قبل از اینترنت، HTTPS بگذارید).
+- **داده‌ها:** در volumeهای `postgres_data` و `af_data` می‌مانند؛ `docker compose down` آن‌ها را نگه می‌دارد ولی `down -v` پاک می‌کند. **از هر دو پشتیبان بگیرید**
+  (`af_data` رمز اصلی است؛ بدون آن کلیدهای ذخیره‌شده خوانا نیستند).
+- **به‌روزرسانی:** `git pull` و دوباره `docker compose up -d --build`.
+- **مدل:** بخش ۴. برای حساب Claude یک خط در `.env` کافی است: `CLAUDE_CODE_OAUTH_TOKEN=...`.
+- **Docker Hub خطای 403 می‌دهد** (در ایران معمول است): در `.env` بنویسید
+  `PYTHON_IMAGE=mirror.gcr.io/library/python:3.11-slim` و `POSTGRES_IMAGE=mirror.gcr.io/library/postgres:16` (امتحان شده و جواب می‌دهد).
+- **هنگام ساخت `CERTIFICATE_VERIFY_FAILED` می‌دهد** (آنتی‌ویروس مثل AVG/Avast «Web Shield» روی HTTPS نظارت می‌کند): گواهی ریشه‌ی آن را در پوشه‌ی
+  `docker/ca/` بگذارید (راهنمایش در `docker/ca/README.md`، با دستور آماده‌ی PowerShell) یا هنگام ساخت اسکن HTTPS را خاموش کنید.
+
+این مسیر روی سیستم همین پروژه (ویندوز + Docker 29) از صفر امتحان شد: ساخت image، بالا آمدن، ساخت حساب و کلید، و ماندن همه‌چیز پس از `down` و `up`.
 
 ### روش ب) بدون Docker (سبک‌ترین، با SQLite)
 
@@ -105,8 +104,9 @@ PowerShell: `$env:AGENT_FACTORY_SECRET_KEY = "رمز-شما"` — لینوکس/�
 
 1. Ollama را نصب کنید (https://ollama.com) و یک مدل بکشید، مثلاً: `ollama pull qwen2.5:7b`
    (حدود ۴٫۵ گیگ؛ روی کارت‌های ۸ گیگ جا می‌شود).
-   با Docker: `docker compose --profile ollama up` و بعد `docker compose exec ollama ollama pull qwen2.5:7b`؛ و در `.env`:
-   `OLLAMA_BASE_URL=http://ollama:11434`
+   **ساده‌ترین راه با Docker:** Ollama را روی خود سیستم نصب کنید (کارت گرافیک مستقیم استفاده می‌شود) و در `.env` بنویسید
+   `OLLAMA_BASE_URL=http://host.docker.internal:11434`. یا داخل Docker: `docker compose --profile ollama up`، بعد
+   `docker compose exec ollama ollama pull qwen2.5:7b` و `OLLAMA_BASE_URL=http://ollama:11434` (GPU در ویندوز تنظیم اضافه می‌خواهد).
 2. در «تنظیمات ← روش دسترسی به مدل» **Ollama (محلی)** را انتخاب کنید.
 3. در همان صفحه، برای هر نقش مدل، **نام مدل** را بنویسید (مثلاً `qwen2.5:7b`)؛ پیش‌فرض برنامه `llama3.2` است.
 4. **محدودیت‌ها:**

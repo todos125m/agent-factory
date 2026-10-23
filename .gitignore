@@ -5,3 +5,7 @@ __pycache__/
 *.db
 .env
 *.egg-info/
+
+# a local TLS-inspection root, see docker/ca/README.md
+docker/ca/*
+!docker/ca/README.md
