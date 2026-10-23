@@ -2925,8 +2925,20 @@ function preferencesCard(){
     ['system', 'light', 'dark'].forEach(function(v){ theme.appendChild(el('option', {value: v}, lbl('theme', v))); });
     theme.value = I18N.theme();
     theme.addEventListener('change', function(){ I18N.setTheme(theme.value); });
+    var swatches = el('div', {class:'swatches', role:'radiogroup', 'aria-label':t('prefs.accent')});
+    function paintSwatches(){
+      var now = I18N.accent();
+      Array.prototype.forEach.call(swatches.children, function(b){ b.setAttribute('aria-checked', b.dataset.accent === now ? 'true' : 'false'); });
+    }
+    I18N.ACCENTS.forEach(function(name){
+      var b = el('button', {type:'button', class:'swatch', role:'radio', 'data-accent':name, title:lbl('accent', name), 'aria-label':lbl('accent', name)});
+      b.addEventListener('click', function(){ I18N.setAccent(name); paintSwatches(); });
+      swatches.appendChild(b);
+    });
+    paintSwatches();
     card.appendChild(el('div', {class:'grid grid-3'},
       el('label', {class:'f'}, t('prefs.theme'), theme),
+      el('div', {class:'f'}, el('span', {text:t('prefs.accent')}), swatches),
       el('label', {class:'f'}, t('prefs.language'), lang),
       el('label', {class:'f'}, t('prefs.level'), level),
       el('label', {class:'f'}, t('prefs.code'), code)));

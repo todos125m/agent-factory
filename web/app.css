@@ -264,3 +264,46 @@ svg.wf-canvas .wfn-model rect,svg.wf-canvas .wfn-tool rect,svg.wf-canvas .wfn-so
 .guide-topic>summary{cursor:pointer;font-weight:800;font-size:15px;min-height:32px;display:flex;align-items:center}
 .guide-topic[open]>summary{margin-bottom:10px}
 .guide-topic .stack{gap:10px}
+
+/* ---------- colour palette: --accent* per choice (Settings → Colour); teal is the default above ---------- */
+:root{--c2:#7C3AED;--c3:#D97706;--c4:#2563EB;--c5:#DB2777;--c6:#16A34A}
+:root[data-theme="dark"]{--c2:#A78BFA;--c3:#F0B34A;--c4:#6EA0FF;--c5:#F472B6;--c6:#4ADE80}
+:root[data-accent="blue"]{--accent:#1D4ED8;--accent-soft:#E6EDFD;--accent-line:#4F7DF3}
+:root[data-accent="violet"]{--accent:#6D28D9;--accent-soft:#EFE8FB;--accent-line:#8B5CF6}
+:root[data-accent="rose"]{--accent:#BE185D;--accent-soft:#FCE8F1;--accent-line:#EC4899}
+:root[data-accent="orange"]{--accent:#C2410C;--accent-soft:#FDEDE0;--accent-line:#F97316}
+:root[data-accent="green"]{--accent:#15803D;--accent-soft:#E3F4E9;--accent-line:#22C55E}
+:root[data-theme="dark"][data-accent="blue"]{--accent:#6EA0FF;--accent-ink:#07142E;--accent-soft:#172544;--accent-line:#7FB0FF}
+:root[data-theme="dark"][data-accent="violet"]{--accent:#A78BFA;--accent-ink:#1A0B3A;--accent-soft:#261A45;--accent-line:#B79CFF}
+:root[data-theme="dark"][data-accent="rose"]{--accent:#F472B6;--accent-ink:#3A0A20;--accent-soft:#40182B;--accent-line:#F78FC6}
+:root[data-theme="dark"][data-accent="orange"]{--accent:#FB923C;--accent-ink:#2E1100;--accent-soft:#3A2210;--accent-line:#FDA55A}
+:root[data-theme="dark"][data-accent="green"]{--accent:#4ADE80;--accent-ink:#052E14;--accent-soft:#14301F;--accent-line:#5EE88F}
+
+.swatches{display:flex;gap:10px;flex-wrap:wrap;align-items:center;min-height:44px}
+.swatch{width:32px;height:32px;border-radius:50%;border:2px solid var(--surface);box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.swatch[aria-checked="true"]{box-shadow:0 0 0 3px var(--ink)}
+.swatch[data-accent="teal"]{background:#0F766E}
+.swatch[data-accent="blue"]{background:#1D4ED8}
+.swatch[data-accent="violet"]{background:#6D28D9}
+.swatch[data-accent="rose"]{background:#BE185D}
+.swatch[data-accent="orange"]{background:#C2410C}
+.swatch[data-accent="green"]{background:#15803D}
+
+/* ---------- a little colour so the page is not flat ---------- */
+.main{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 9%,transparent),transparent 280px) no-repeat}
+.brand b{color:var(--accent)}
+.page-head h2::before{content:"";display:inline-block;width:4px;height:1em;border-radius:3px;background:var(--accent);margin-inline-end:10px;vertical-align:-.12em}
+.nav-item .ic{color:var(--accent)}
+.nav-item:nth-child(6n+2) .ic{color:var(--c2)}
+.nav-item:nth-child(6n+3) .ic{color:var(--c3)}
+.nav-item:nth-child(6n+4) .ic{color:var(--c4)}
+.nav-item:nth-child(6n+5) .ic{color:var(--c5)}
+.nav-item:nth-child(6n) .ic{color:var(--c6)}
+.nav-item.active .ic{color:var(--accent)}
+.card.stat{border-top:3px solid var(--accent-line)}
+.card.stat:nth-child(3n+2){border-top-color:var(--c2)}
+.card.stat:nth-child(3n){border-top-color:var(--c3)}
+.chip.ev-inference,.badge{background:var(--accent-soft);color:var(--accent)}
+.btn:not(.ghost):not(.danger):hover{filter:brightness(1.08)}
+.list-item:hover{background:var(--accent-soft)}
+.empty-state .ic{color:var(--accent)}
