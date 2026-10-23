@@ -88,6 +88,7 @@ LABELLED = {
     "role": sorted(MODEL_ROLES),
     "approval": ["auto", "manager", "user"],
     "access": ["api_key", "claude_account", "ollama"],
+    "accent": ["teal", "blue", "violet", "rose", "orange", "green"],
     "effort": ["low", "medium", "high"],
     "depth": ["quick", "standard", "deep"],
     "evidence": ["FACT", "INFERENCE", "HYPOTHESIS"],

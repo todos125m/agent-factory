@@ -8,6 +8,12 @@
 
 var MESSAGES = /*MESSAGES*/{
  "en": {
+  "accent.blue": "Blue",
+  "accent.green": "Green",
+  "accent.orange": "Orange",
+  "accent.rose": "Rose",
+  "accent.teal": "Teal",
+  "accent.violet": "Violet",
   "access.api_key": "API key",
   "access.claude_account": "My own Claude account",
   "access.ollama": "Ollama (local)",
@@ -574,6 +580,7 @@ var MESSAGES = /*MESSAGES*/{
   "policy.delegated_bounded": "Bounded delegation — only within the approved scope; stops on ambiguity",
   "policy.milestone": "Milestones — approve the main points",
   "policy.step_by_step": "Step by step — approve every step",
+  "prefs.accent": "Colour",
   "prefs.code": "Show code and technical details",
   "prefs.code_follow": "Follow the level ({value})",
   "prefs.confirm_level": "Confirm this level",
@@ -891,6 +898,12 @@ var MESSAGES = /*MESSAGES*/{
   "workflows.title": "Workflows"
  },
  "fa": {
+  "accent.blue": "آبی",
+  "accent.green": "سبز",
+  "accent.orange": "نارنجی",
+  "accent.rose": "صورتی",
+  "accent.teal": "سبزآبی",
+  "accent.violet": "بنفش",
   "access.api_key": "کلید API",
   "access.claude_account": "حساب Claude خودم",
   "access.ollama": "Ollama (محلی)",
@@ -1457,6 +1470,7 @@ var MESSAGES = /*MESSAGES*/{
   "policy.delegated_bounded": "واگذاری محدود — فقط در دامنه‌ی تأییدشده؛ توقف در ابهام",
   "policy.milestone": "نقاط اصلی — تأیید مراحل کلیدی",
   "policy.step_by_step": "گام‌به‌گام — تأیید هر مرحله",
+  "prefs.accent": "رنگ",
   "prefs.code": "نمایش کد و جزئیات فنی",
   "prefs.code_follow": "طبق سطح ({value})",
   "prefs.confirm_level": "تأیید همین سطح",
@@ -1774,6 +1788,12 @@ var MESSAGES = /*MESSAGES*/{
   "workflows.title": "workflowها"
  },
  "tr": {
+  "accent.blue": "Mavi",
+  "accent.green": "Yeşil",
+  "accent.orange": "Turuncu",
+  "accent.rose": "Pembe",
+  "accent.teal": "Turkuaz",
+  "accent.violet": "Mor",
   "access.api_key": "API anahtarı",
   "access.claude_account": "Kendi Claude hesabım",
   "access.ollama": "Ollama (yerel)",
@@ -2340,6 +2360,7 @@ var MESSAGES = /*MESSAGES*/{
   "policy.delegated_bounded": "Sınırlı yetki — yalnızca onaylı kapsamda; belirsizlikte durur",
   "policy.milestone": "Kilometre taşları — ana noktaları onayla",
   "policy.step_by_step": "Adım adım — her adımı onayla",
+  "prefs.accent": "Renk",
   "prefs.code": "Kodu ve teknik ayrıntıları göster",
   "prefs.code_follow": "Düzeye göre ({value})",
   "prefs.confirm_level": "Bu düzeyi onayla",
@@ -2710,6 +2731,17 @@ function tIn(loc, key){
 function storedTheme(){
   try { var v = localStorage.getItem('af_theme'); return v === 'dark' || v === 'light' ? v : 'system'; } catch (e){ return 'system'; }
 }
+var ACCENTS = ["teal", "blue", "violet", "rose", "orange", "green"];
+// The colour of buttons and highlights: one of ACCENTS, teal by default. Stored in this browser only.
+function storedAccent(){
+  try { var v = localStorage.getItem('af_accent'); return ACCENTS.indexOf(v) >= 0 ? v : 'teal'; } catch (e){ return 'teal'; }
+}
+function setAccent(name){
+  try {
+    if (ACCENTS.indexOf(name) >= 0 && name !== 'teal') localStorage.setItem('af_accent', name); else localStorage.removeItem('af_accent');
+  } catch (e){}
+  apply();
+}
 function effectiveTheme(){
   var chosen = storedTheme();
   if (chosen !== 'system') return chosen;
@@ -2729,6 +2761,9 @@ function apply(){
   var theme = effectiveTheme();
   if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
   else document.documentElement.removeAttribute('data-theme');
+  var accent = storedAccent();
+  if (accent === 'teal') document.documentElement.removeAttribute('data-accent');
+  else document.documentElement.setAttribute('data-accent', accent);
   var meta = document.getElementById('theme-color');
   if (meta) meta.setAttribute('content', theme === 'dark' ? '#0B1220' : '#F8FAFC');
   var loc = locale();
@@ -2761,7 +2796,8 @@ function fmtTime(iso){
 window.I18N = {
   LOCALES: LOCALES, NATIVE_NAMES: NATIVE_NAMES,
   t: t, tIn: tIn, has: has, locale: locale, isRtl: isRtl, setLocale: setLocale, apply: apply,
-  storedLocale: readStored, fmtNum: fmtNum, fmtTime: fmtTime, theme: storedTheme, effectiveTheme: effectiveTheme, setTheme: setTheme
+  storedLocale: readStored, fmtNum: fmtNum, fmtTime: fmtTime, theme: storedTheme, effectiveTheme: effectiveTheme, setTheme: setTheme,
+  ACCENTS: ACCENTS, accent: storedAccent, setAccent: setAccent
 };
 
 // Before app.js draws anything: the page opens in the remembered language and direction, no flash of the other.
