@@ -299,7 +299,8 @@ function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(
 // (app/setup.py): booleans and names, never a secret.
 function setupIncomplete(s){
   var m = s.model;
-  if (m.access === 'claude_account') return !(m.claude.token || m.claude.cli);
+  // In Docker the Claude tool exists but can't log in: it needs the token. Locally the tool being there is the start.
+  if (m.access === 'claude_account') return s.server.in_docker ? !m.claude.token : !m.claude.cli;
   if (m.access === 'api_key') return !(m.anthropic_key || m.connections.indexOf('anthropic') >= 0);
   if (m.access === 'ollama') return !(m.ollama && m.ollama.reachable);
   return false;
