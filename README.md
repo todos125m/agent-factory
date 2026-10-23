@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR6b–PR7 pending | 🟡 PR6 |
+| Human-guided factory (Issue #2) | PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR7 pending | 🟡 PR6b |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -247,6 +247,24 @@ from the currently approved brief and moves the build to BUILDING (PR5). The UI'
 | POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
 | POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
 | POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
+
+### Connections: your own API keys (issue #2 PR6b)
+
+Settings → Connections keeps a provider key (Anthropic, OpenAI) **encrypted** on the server: add it once, and afterwards only
+`••••` plus its last four characters, its name, provider and the result of its last test are ever shown. Elsewhere it is a
+reference, `cred:<id>`, chosen per model role in the model settings; the key is used only for its owner's own calls and
+its own provider, and never appears in a log, event, error, settings layer, blueprint or workflow. *Test* makes one free
+request to the provider's own list-models endpoint, only when pressed, and shows what came back. Revoking wipes the key.
+**Setup:** set `AGENT_FACTORY_SECRET_KEY` (at least 32 characters, see `.env.example`) and `pip install -e .` (the new
+`cryptography` dependency); without them keys can't be added and the page says why. Back the secret up: without it stored
+keys can't be read.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/credentials` | your connections, masked, and whether keys can be kept here |
+| POST | `/credentials` | `{name, provider, key, request_id}` — the only time a key is sent |
+| POST | `/credentials/{id}/test` | one free request to the provider; records what it answered |
+| DELETE | `/credentials/{id}` | revoke (wipes the key) |
 
 ### Workflows (issue #2 PR6)
 

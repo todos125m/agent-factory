@@ -641,3 +641,24 @@ class WorkflowVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Credential(Base):
+    """A provider API key the owner added (app/credentials.py): kept encrypted with a master secret from the environment,
+    shown only masked, referred to elsewhere as `cred:<id>`. Revoking wipes `ciphertext` (the row stays so a reference
+    to it says "revoked")."""
+
+    __tablename__ = "credentials"
+    __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(20))  # anthropic | openai
+    ciphertext: Mapped[str] = mapped_column(Text, default="")
+    last4: Mapped[str] = mapped_column(String(4))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    test_result: Mapped[str | None] = mapped_column(String(20))  # ok | rejected | unreachable
+    tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -23,7 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import Integer, select
 
 import app as app_package
-from app import build, runtime
+from app import build, credentials, runtime
 from app.chat import ChatReplyOut
 from app.db import Base, varchar_length
 from app.gateway.providers import FakeProvider
@@ -97,6 +97,12 @@ API = {
         lambda c, x, v: send(c, "POST", "/factory/sessions", {"request_id": v}), "request_id"),
     ("workflows", "name"): (
         lambda c, x, v: send(c, "POST", "/workflows", {"name": v, "request_id": f"wfname-{len(v):06d}"}), "name"),
+    ("credentials", "name"): (
+        lambda c, x, v: send(c, "POST", "/credentials", {"name": v, "provider": "anthropic", "key": "k" * 24,
+                                                         "request_id": f"credname-{len(v):06d}"}), "name"),
+    ("credentials", "request_id"): (
+        lambda c, x, v: send(c, "POST", "/credentials", {"name": "n", "provider": "anthropic", "key": "k" * 24,
+                                                         "request_id": v}), "request_id"),
     ("workflows", "request_id"): (
         lambda c, x, v: send(c, "POST", "/workflows", {"name": "n", "request_id": v}), "request_id"),
     ("agents", "name"): (
@@ -158,6 +164,9 @@ CLOSED = {
     ("tool_executions", "idempotency_key"): lambda: {
         f"run{'9' * 10}:step{'9' * 10}:{max(runtime.TOOLS, key=len)}:{'f' * 16}"},
     ("tool_executions", "state"): lambda: runtime.EXECUTION_STATES,
+    ("credentials", "provider"): lambda: set(credentials.PROVIDERS),  # app/credentials.py::add refuses any other
+    ("credentials", "test_result"): lambda: set(credentials.TEST_RESULTS),
+    ("credentials", "last4"): lambda: {"f" * 4},  # the key's last four characters
     ("agent_versions", "state"): lambda: build.VERSION_STATES,
     ("evaluations", "verdict"): lambda: build.VERDICTS,
     ("tasks", "reason"): lambda: runtime.STOP_REASONS | set(runtime.WAITING_REASONS.values()),

@@ -45,6 +45,7 @@ class ModelRequest:
     json_schema: dict[str, Any] | None = None
     effort: str | None = None
     web_search: WebSearchConfig | None = None
+    api_key: str | None = field(default=None, repr=False)  # the owner's own key for this call (app/credentials.py)
 
 
 @dataclass
@@ -83,13 +84,16 @@ class AnthropicProvider:
     def __init__(self) -> None:
         self._client = None
 
-    def _get_client(self):
-        if self._client is None:
-            try:
-                import anthropic
-            except ImportError as e:
-                raise ProviderError("anthropic package not installed: pip install -e '.[anthropic]'") from e
-            self._client = anthropic.Anthropic(**paid_client_limits())  # credentials from env / `ant auth login`
+    def _get_client(self, api_key: str | None = None):
+        if api_key is None and self._client is not None:
+            return self._client
+        try:
+            import anthropic
+        except ImportError as e:
+            raise ProviderError("anthropic package not installed: pip install -e '.[anthropic]'") from e
+        if api_key:  # the owner's own key, for this call only: never kept on the provider
+            return anthropic.Anthropic(api_key=api_key, **paid_client_limits())
+        self._client = anthropic.Anthropic(**paid_client_limits())  # credentials from env (`ant auth login`)
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:
@@ -116,7 +120,7 @@ class AnthropicProvider:
                 "max_uses": request.web_search.max_uses,
             }]
 
-        response = self._get_client().messages.create(**kwargs)
+        response = self._get_client(request.api_key).messages.create(**kwargs)
         if response.stop_reason == "refusal":
             raise ProviderError("model refused the request")
         text = "".join(b.text for b in response.content if b.type == "text")

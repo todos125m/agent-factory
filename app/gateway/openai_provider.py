@@ -36,13 +36,16 @@ class OpenAIProvider:
     def __init__(self) -> None:
         self._client = None
 
-    def _get_client(self):
-        if self._client is None:
-            try:
-                import openai
-            except ImportError as e:
-                raise ProviderError("openai package not installed: pip install -e '.[openai]'") from e
-            self._client = openai.OpenAI(**paid_client_limits())  # OPENAI_API_KEY from env
+    def _get_client(self, api_key: str | None = None):
+        if api_key is None and self._client is not None:
+            return self._client
+        try:
+            import openai
+        except ImportError as e:
+            raise ProviderError("openai package not installed: pip install -e '.[openai]'") from e
+        if api_key:  # the owner's own key, for this call only: never kept on the provider
+            return openai.OpenAI(api_key=api_key, **paid_client_limits())
+        self._client = openai.OpenAI(**paid_client_limits())  # credentials from env (OPENAI_API_KEY from env)
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:
@@ -68,7 +71,7 @@ class OpenAIProvider:
             kwargs["reasoning_effort"] = request.effort
 
         try:
-            response = self._get_client().chat.completions.create(**kwargs)
+            response = self._get_client(request.api_key).chat.completions.create(**kwargs)
         except ProviderError:
             raise
         except Exception as e:  # the openai SDK's own exception hierarchy (auth/rate-limit/API errors)

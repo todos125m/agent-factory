@@ -165,7 +165,7 @@ def test_every_field_the_web_form_sets_is_accepted_and_resolved(client, project)
         "output_locale": "en",
         "depth": "deep",
         "max_steps": 8,
-        "models": {role: {"provider": "anthropic", "model": "claude-sonnet-5", "effort": "low"} for role in MODEL_ROLES},
+        "models": {role: {"provider": "anthropic", "model": "claude-sonnet-5", "effort": "low", "credential_ref": None} for role in MODEL_ROLES},
         "model_access": "api_key",
         "budget": {"project_usd": 12.5, "task_usd": 2, "max_output_tokens": 4000, "max_web_searches": 3},
         "context": {"max_chars": 8000},

@@ -2,6 +2,7 @@ import os
 from contextlib import contextmanager
 
 os.environ.setdefault("AGENT_FACTORY_WORKERS", "0")
+os.environ.setdefault("AGENT_FACTORY_SECRET_KEY", "test-only-master-secret-not-for-use-0123456789")
 
 import pytest
 from fastapi.testclient import TestClient
