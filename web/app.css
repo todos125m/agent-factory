@@ -307,3 +307,6 @@ svg.wf-canvas .wfn-model rect,svg.wf-canvas .wfn-tool rect,svg.wf-canvas .wfn-so
 .btn:not(.ghost):not(.danger):hover{filter:brightness(1.08)}
 .list-item:hover{background:var(--accent-soft)}
 .empty-state .ic{color:var(--accent)}
+.guide-group{font-size:14px;color:var(--muted);margin-top:6px}
+.guide-panel{border-color:var(--accent-line)}
+.guide-panel p{overflow-wrap:anywhere}

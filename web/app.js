@@ -438,37 +438,78 @@ function renderSetup(root){
 
 /* ============================== guide: every way to connect and use it, inside the app ============================== */
 
-// Each topic is a title plus numbered steps; a step may have a line to copy. Text lives in i18n.js (guide.<topic>.<n>).
-var GUIDE = [
-  {id:'claude', open:true, steps:[{n:1, code:'claude setup-token'}, {n:2}, {n:3, code:'CLAUDE_CODE_OAUTH_TOKEN=...'}, {n:4, code:'docker compose up -d'}, {n:5, code:'claude'}, {n:6}]},
-  {id:'ollama', steps:[{n:1, code:'ollama pull qwen2.5:7b'}, {n:2}, {n:3, code:'OLLAMA_BASE_URL=http://host.docker.internal:11434'},
-    {n:4, code:'docker compose --profile ollama up -d'}, {n:5, code:'docker compose exec ollama ollama pull qwen2.5:7b'}, {n:5, code:'OLLAMA_BASE_URL=http://ollama:11434', same:true}, {n:6}, {n:7}]},
-  {id:'apikey', steps:[{n:1, code:'ANTHROPIC_API_KEY=...'}, {n:2}, {n:3}]},
-  {id:'roles', steps:[{n:1}, {n:2}, {n:3}, {n:4}]},
-  {id:'first', steps:[{n:1}, {n:2}, {n:3}, {n:4}, {n:5}]},
-  {id:'workflow', steps:[{n:1}, {n:2}, {n:3}]},
-  {id:'api', steps:[{n:1}, {n:2}, {n:3, code:'Authorization: Bearer <your key>'}, {n:4}]},
-  {id:'people', steps:[{n:1}, {n:2}, {n:3}]},
-  {id:'keep', steps:[{n:1, code:'git pull && docker compose up -d --build'}, {n:2}, {n:3}, {n:4}, {n:5, code:'docker compose logs api'}]}
+// Options, not a wall of text: the person picks what they want to do, and sees only those steps. A topic is a title and
+// its steps, or several variants (each its own steps). A step may carry a line to copy. Text: i18n.js guide.<topic>.<n>.
+// The hash keeps the choice (#guide/claude/docker), so a link goes straight to it.
+var GUIDE_GROUPS = [
+  {title:'guide.group.model', topics:['claude', 'ollama', 'apikey']},
+  {title:'guide.group.use', topics:['roles', 'first', 'workflow', 'api', 'people', 'keep']}
 ];
+var GUIDE = {
+  claude: {variants:[
+    {id:'docker', steps:[{n:1, code:'claude setup-token'}, {n:2}, {n:3, code:'CLAUDE_CODE_OAUTH_TOKEN=...'}, {n:4, code:'docker compose up -d'}, {n:6}]},
+    {id:'local', steps:[{n:5, code:'claude'}, {n:6}]}]},
+  ollama: {variants:[
+    {id:'computer', steps:[{n:1, code:'ollama pull qwen2.5:7b'}, {n:2}, {n:3, code:'OLLAMA_BASE_URL=http://host.docker.internal:11434'}, {n:6}, {n:7}]},
+    {id:'docker', steps:[{n:4, code:'docker compose --profile ollama up -d'}, {n:5, code:'docker compose exec ollama ollama pull qwen2.5:7b'},
+      {n:5, code:'OLLAMA_BASE_URL=http://ollama:11434', same:true}, {n:6}, {n:7}]}]},
+  apikey: {steps:[{n:1, code:'ANTHROPIC_API_KEY=...'}, {n:2}, {n:3}]},
+  roles: {steps:[{n:1}, {n:2}, {n:3}, {n:4}]},
+  first: {steps:[{n:1}, {n:2}, {n:3}, {n:4}, {n:5}]},
+  workflow: {steps:[{n:1}, {n:2}, {n:3}]},
+  api: {steps:[{n:1}, {n:2}, {n:3, code:'Authorization: Bearer <your key>'}, {n:4}]},
+  people: {steps:[{n:1}, {n:2}, {n:3}]},
+  keep: {steps:[{n:1, code:'git pull && docker compose up -d --build'}, {n:2}, {n:3}, {n:4}, {n:5, code:'docker compose logs api'}]}
+};
 
-function renderGuide(root){
+function renderGuide(root, parts){
+  var topicId = parts && GUIDE[parts[1]] ? parts[1] : null;
+  var topic = topicId ? GUIDE[topicId] : null;
+  var variant = null;
+  if (topic && topic.variants) variant = topic.variants.filter(function(v){ return v.id === (parts[2] || ''); })[0] || topic.variants[0];
+
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('guide.title')})));
   var body = el('div', {class:'stack'});
   body.appendChild(el('p', {class:'muted', text:t('guide.intro')}));
-  body.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('setup'); }}, t('guide.open_setup'))));
-  GUIDE.forEach(function(topic){
-    var d = el('details', {class:'card guide-topic'}, el('summary', {text:t('guide.' + topic.id + '.title')}));
-    if (topic.open) d.setAttribute('open', '');
-    var steps = el('div', {class:'stack'});
-    topic.steps.forEach(function(st){
-      if (!st.same) steps.appendChild(el('p', {text:t('guide.' + topic.id + '.' + st.n)}));
-      if (st.code) steps.appendChild(codeLine(st.code));
+
+  GUIDE_GROUPS.forEach(function(group){
+    var grid = el('div', {class:'grid grid-2', role:'radiogroup', 'aria-label':t(group.title)});
+    group.topics.forEach(function(id){
+      var on = id === topicId;
+      var b = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': on ? 'true' : 'false'},
+        el('span', {}, el('b', {text:t('guide.' + id + '.title')})));
+      b.addEventListener('click', function(){ go('guide/' + id); });
+      grid.appendChild(b);
     });
-    d.appendChild(steps);
-    body.appendChild(d);
+    body.appendChild(el('h3', {class:'guide-group', text:t(group.title)}));
+    body.appendChild(grid);
   });
+
+  var panel = el('div', {class:'card stack guide-panel', id:'guide-panel'});
+  if (!topic){
+    panel.appendChild(el('p', {class:'muted', text:t('guide.pick')}));
+  } else {
+    panel.appendChild(el('h3', {text:t('guide.' + topicId + '.title')}));
+    if (variant){
+      var vrow = el('div', {class:'row', role:'radiogroup'});
+      topic.variants.forEach(function(v){
+        var vb = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': v === variant ? 'true' : 'false', style:'width:auto'},
+          el('span', {}, el('b', {text:t('guide.variant.' + topicId + '.' + v.id)})));
+        vb.addEventListener('click', function(){ go('guide/' + topicId + '/' + v.id); });
+        vrow.appendChild(vb);
+      });
+      panel.appendChild(vrow);
+    }
+    var count = 0;
+    (variant ? variant.steps : topic.steps).forEach(function(st){
+      if (!st.same){ count += 1; panel.appendChild(el('p', {text:fmtNum(count) + '. ' + t('guide.' + topicId + '.' + st.n)})); }
+      if (st.code) panel.appendChild(codeLine(st.code));
+    });
+  }
+  body.appendChild(panel);
+  body.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('setup'); }}, t('guide.open_setup'))));
   root.appendChild(body);
+  if (topic){ try { panel.scrollIntoView({block:'nearest'}); } catch (e){} }
 }
 
 /* ============================== router ============================== */
@@ -517,7 +558,7 @@ function route(){
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'benchmark') renderBenchmark(root);
   else if (page === 'settings') renderSettings(root);
-  else if (page === 'guide') renderGuide(root);
+  else if (page === 'guide') renderGuide(root, parts);
   else if (page === 'observability') renderObservability(root);
 }
 
