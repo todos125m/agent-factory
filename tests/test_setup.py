@@ -75,6 +75,20 @@ def test_ollama_is_checked_only_when_it_is_the_method(client, monkeypatch):
     assert o["reachable"] is False and o["models"] == []
 
 
+def test_the_guide_can_probe_ollama_when_it_is_not_the_method(client, monkeypatch):
+    client.post("/users", json={"email": "a@example.com"})
+
+    class Tags:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return json.dumps({"models": [{"name": "qwen2.5:7b"}]}).encode()
+
+    monkeypatch.setattr(setup.urllib.request, "urlopen", lambda url, timeout: Tags())
+    assert client.get("/setup/status").json()["model"]["ollama"] is None
+    o = client.get("/setup/status", params={"probe": "ollama"}).json()["model"]["ollama"]
+    assert o["reachable"] is True and o["models"] == ["qwen2.5:7b"]
+
+
 def test_the_model_test_makes_one_logged_call_and_reports_the_reply(client, session_factory):
     client.post("/users", json={"email": "a@example.com"})
     fake = fake_models(client, session_factory, [{"text": "ignored"}])

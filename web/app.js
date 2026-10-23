@@ -338,6 +338,28 @@ function checkRow(ok, text){
     el('span', {text:text}));
 }
 
+// One tiny model call, only when the button is pressed (Setup and the Guide both show it).
+function modelTester(isAdmin){
+  var result = el('div', {class:'stack', role:'status'});
+  var button = el('button', {class:'btn', type:'button', text:t('setup.test'), disabled: isAdmin ? null : 'disabled'});
+  button.addEventListener('click', function(){
+    button.disabled = true; clear(result); result.appendChild(el('p', {class:'muted', text:t('setup.testing')}));
+    api('/setup/test-model', {method:'POST'}).then(function(r){
+      clear(result);
+      if (r.ok){
+        result.appendChild(withIcon('check', t('setup.test_ok', {reply: r.reply, provider: r.provider, model: r.model, seconds: fmtNum(Math.round((r.duration_ms || 0) / 100) / 10)}), 'p', {class:'chip status-COMPLETED'}));
+      } else {
+        result.appendChild(el('p', {class:'err', text:t('setup.test_failed')}));
+        result.appendChild(el('pre', {class:'code', dir:'ltr', text:r.error}));
+        result.appendChild(el('p', {class:'muted', text:t('setup.test_hint')}));
+      }
+      button.disabled = false;
+    }).catch(function(e){ clear(result); result.appendChild(el('p', {class:'err', text:e.message})); button.disabled = false; });
+  });
+  return {button: button, result: result,
+    help: el('p', {class:'muted', text: isAdmin ? t('setup.test_help') : t('setup.test_admin_only')})};
+}
+
 function renderSetup(root){
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('setup.title')})));
   var body = el('div', {class:'stack'});
@@ -388,26 +410,11 @@ function renderSetup(root){
     }
     card.appendChild(steps);
 
-    var result = el('div', {class:'stack', role:'status'});
-    var test = el('button', {class:'btn', type:'button', text:t('setup.test'), disabled: s.is_admin ? null : 'disabled'});
-    test.addEventListener('click', function(){
-      test.disabled = true; clear(result); result.appendChild(el('p', {class:'muted', text:t('setup.testing')}));
-      api('/setup/test-model', {method:'POST'}).then(function(r){
-        clear(result);
-        if (r.ok){
-          result.appendChild(withIcon('check', t('setup.test_ok', {reply: r.reply, provider: r.provider, model: r.model, seconds: fmtNum(Math.round((r.duration_ms || 0) / 100) / 10)}), 'p', {class:'chip status-COMPLETED'}));
-        } else {
-          result.appendChild(el('p', {class:'err', text:t('setup.test_failed')}));
-          result.appendChild(el('pre', {class:'code', dir:'ltr', text:r.error}));
-          result.appendChild(el('p', {class:'muted', text:t('setup.test_hint')}));
-        }
-        test.disabled = false;
-      }).catch(function(e){ clear(result); result.appendChild(el('p', {class:'err', text:e.message})); test.disabled = false; });
-    });
-    card.appendChild(el('div', {class:'btn-row'}, test,
+    var tester = modelTester(s.is_admin);
+    card.appendChild(el('div', {class:'btn-row'}, tester.button,
       el('button', {class:'btn ghost', type:'button', onclick:function(){ go('settings'); }}, t('setup.open_settings'))));
-    card.appendChild(el('p', {class:'muted', text: s.is_admin ? t('setup.test_help') : t('setup.test_admin_only')}));
-    card.appendChild(result);
+    card.appendChild(tester.help);
+    card.appendChild(tester.result);
     return card;
   }
 
@@ -462,6 +469,139 @@ var GUIDE = {
   keep: {steps:[{n:1, code:'git pull && docker compose up -d --build'}, {n:2}, {n:3}, {n:4}, {n:5, code:'docker compose logs api'}]}
 };
 
+// The global layer is every account's default model route; only the admin writes it. Read, change one thing, write back.
+function changeGlobalSettings(change){
+  return api('/settings/global/0').then(function(layer){
+    var values = layer.values || {};
+    change(values);
+    return api('/settings/global/0', {method:'PUT', json: values});
+  });
+}
+
+// Choosing a method starts from clean routes: a role's own provider, model or connection from an earlier method would
+// otherwise win over the method chosen (an explicit role setting beats model_access).
+function resetRoutes(values, method){
+  values.model_access = method;
+  var models = values.models || {};
+  MODEL_ROLES.forEach(function(r){
+    if (!models[r]) return;
+    delete models[r].provider; delete models[r].credential_ref; delete models[r].model;
+    if (!Object.keys(models[r]).length) delete models[r];
+  });
+  values.models = models;
+  if (!Object.keys(models).length) delete values.models;
+}
+
+// "Do it here": the choice made in the guide is applied by the guide, then tested. Status comes from /setup/status.
+function connectPanel(topicId){
+  var box = el('div', {class:'card stack', style:'background:var(--surface-2)'}, el('h4', {text:t('guide.connect.title')}));
+  var slot = el('div', {class:'stack'}, loadingBox());
+  box.appendChild(slot);
+  var message = el('p', {class:'muted', role:'status'});
+
+  function applied(){ message.className = 'ok-line'; message.textContent = t('guide.connect.applied'); }
+  function failed(e){ message.className = 'err'; message.textContent = e.message; }
+
+  api('/setup/status' + (topicId === 'ollama' ? '?probe=ollama' : '')).then(function(s){
+    clear(slot);
+    var m = s.model;
+    var admin = s.is_admin;
+    if (!admin) slot.appendChild(el('p', {class:'notice', text:t('guide.connect.admin_only')}));
+    var use = null;
+
+    if (topicId === 'claude'){
+      slot.appendChild(checkRow(m.claude.cli, t('setup.check_cli')));
+      slot.appendChild(checkRow(m.claude.token, t('setup.check_token')));
+      use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_claude'), disabled: admin ? null : 'disabled'});
+      use.addEventListener('click', function(){
+        use.disabled = true; message.textContent = '';
+        changeGlobalSettings(function(v){ resetRoutes(v, 'claude_account'); }).then(applied).catch(failed).then(function(){ use.disabled = false; });
+      });
+    } else if (topicId === 'ollama'){
+      var o = m.ollama || {reachable:false, models:[], url:''};
+      slot.appendChild(checkRow(o.reachable, t('setup.check_ollama', {url: o.url})));
+      if (o.reachable) slot.appendChild(el('p', {class:'muted', text:t('setup.check_ollama_models', {models: o.models.join(', ') || '—'})}));
+      var model = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.ollama_model'), placeholder:'qwen2.5:7b'});
+      if (o.models && o.models.length) model.value = o.models[0];
+      slot.appendChild(el('label', {class:'f'}, t('guide.connect.ollama_model'), model));
+      use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_ollama'), disabled: admin ? null : 'disabled'});
+      use.addEventListener('click', function(){
+        use.disabled = true; message.textContent = '';
+        changeGlobalSettings(function(v){
+          resetRoutes(v, 'ollama');
+          var name = model.value.trim();
+          if (name){ v.models = v.models || {}; MODEL_ROLES.forEach(function(r){ v.models[r] = Object.assign({}, v.models[r], {model: name}); }); }
+        }).then(applied).catch(failed).then(function(){ use.disabled = false; });
+      });
+    } else if (topicId === 'apikey'){
+      if (!s.keys.available){
+        slot.appendChild(el('p', {class:'notice', role:'status', text:t(s.keys.reason === 'crypto_unavailable' ? 'setup.keys_crypto' : 'setup.keys_secret')}));
+      } else {
+        var name = el('input', {type:'text', maxlength:'100', 'aria-label':t('guide.connect.key_name'), value:'Anthropic'});
+        // password, no autofill, no spellcheck: typed or pasted once, and the field is emptied at once
+        var key = el('input', {type:'password', autocomplete:'off', spellcheck:'false', dir:'ltr', 'aria-label':t('guide.connect.key_label'), placeholder:'sk-ant-...'});
+        slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_name'), name));
+        slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_label'), key));
+        slot.appendChild(el('p', {class:'muted', text:t('guide.connect.key_help')}));
+        use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_apikey'), disabled: admin ? null : 'disabled'});
+        use.addEventListener('click', function(){
+          if (!key.value) return;
+          // A second key with the untouched default name would clash with the first one: the last 4 characters tell them apart.
+          var given = name.value.trim();
+          var body = {name: (!given || given === 'Anthropic') ? 'Anthropic …' + key.value.slice(-4) : given, provider:'anthropic', key: key.value, request_id: newRequestId()};
+          key.value = '';
+          use.disabled = true; message.textContent = '';
+          var cred = null;
+          api('/credentials', {method:'POST', json: body}).then(function(c){
+            cred = c;
+            return changeGlobalSettings(function(v){
+              resetRoutes(v, 'api_key');
+              v.models = v.models || {};
+              MODEL_ROLES.forEach(function(r){ v.models[r] = Object.assign({}, v.models[r], {credential_ref: c.ref}); });
+            });
+          }).then(function(){ return api('/credentials/' + cred.id + '/test', {method:'POST'}); })
+            .then(function(c){
+              message.className = c.test_result === 'ok' ? 'ok-line' : 'err';
+              message.textContent = (c.test_result === 'ok' ? t('guide.connect.key_saved') + ' ' : '') + t('guide.connect.key_result', {result: lbl('ctest', c.test_result)});
+            }).catch(failed).then(function(){ use.disabled = false; });
+        });
+      }
+    }
+    if (use) slot.appendChild(el('div', {class:'btn-row'}, use));
+    var tester = modelTester(admin);
+    slot.appendChild(message);
+    slot.appendChild(el('div', {class:'btn-row'}, tester.button));
+    slot.appendChild(tester.help);
+    slot.appendChild(tester.result);
+  }).catch(function(e){ clear(slot); slot.appendChild(errorBox(e.message, function(){ go('guide/' + topicId); })); });
+  return box;
+}
+
+// Sites that hand out a free API key (checked in the 2026 comparisons; their limits change, so the text says to read the site).
+var FREE_APIS = [
+  {id:'google', name:'Google AI Studio', url:'https://aistudio.google.com/'},
+  {id:'openrouter', name:'OpenRouter', url:'https://openrouter.ai/'},
+  {id:'groq', name:'Groq', url:'https://console.groq.com/'},
+  {id:'mistral', name:'Mistral', url:'https://console.mistral.ai/'},
+  {id:'cloudflare', name:'Cloudflare Workers AI', url:'https://developers.cloudflare.com/workers-ai/'},
+  {id:'github', name:'GitHub Models', url:'https://github.com/marketplace/models'},
+  {id:'huggingface', name:'Hugging Face', url:'https://huggingface.co/docs/inference-providers'},
+  {id:'cerebras', name:'Cerebras', url:'https://cloud.cerebras.ai/'},
+  {id:'list', name:'free-llm-api-resources', url:'https://github.com/cheahjs/free-llm-api-resources'}
+];
+function freeApisCard(){
+  var card = el('div', {class:'card stack', style:'background:var(--surface-2)'}, el('h4', {text:t('guide.free.title')}), el('p', {class:'muted', text:t('guide.free.intro')}));
+  var list = el('ul', {class:'free-list'});
+  FREE_APIS.forEach(function(f){
+    list.appendChild(el('li', {}, el('a', {href:f.url, target:'_blank', rel:'noopener noreferrer', dir:'ltr', text:f.name}), el('span', {class:'muted', text:' — ' + t('guide.free.' + f.id)})));
+  });
+  card.appendChild(list);
+  card.appendChild(el('p', {class:'muted', text:t('guide.free.note_data')}));
+  card.appendChild(el('p', {class:'muted', text:t('guide.free.note_region')}));
+  card.appendChild(el('p', {text:t('guide.free.note_use')}));
+  return card;
+}
+
 function renderGuide(root, parts){
   var topicId = parts && GUIDE[parts[1]] ? parts[1] : null;
   var topic = topicId ? GUIDE[topicId] : null;
@@ -505,6 +645,8 @@ function renderGuide(root, parts){
       if (!st.same){ count += 1; panel.appendChild(el('p', {text:fmtNum(count) + '. ' + t('guide.' + topicId + '.' + st.n)})); }
       if (st.code) panel.appendChild(codeLine(st.code));
     });
+    if (topicId === 'claude' || topicId === 'ollama' || topicId === 'apikey') panel.appendChild(connectPanel(topicId));
+    if (topicId === 'apikey') panel.appendChild(freeApisCard());
   }
   body.appendChild(panel);
   body.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('setup'); }}, t('guide.open_setup'))));
