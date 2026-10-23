@@ -73,7 +73,7 @@ def test_model(db: Session, gateway: Gateway, me: User, role: str = TEST_ROLE) -
         raise AppError(429, "too_many_attempts", "Wait a few seconds between tests")
     _last_test = now
     try:
-        response = gateway.call(role, system="You answer in one word.", user=TEST_PROMPT, agent="setup")
+        response = gateway.call(role, system="You answer in one word.", user=TEST_PROMPT, agent="setup", owner_id=me.id)
     except (ProviderError, BudgetExceeded) as e:
         return {"ok": False, "role": role, "error": str(e)[:400]}
     route = settings_layers.resolve(db)["models"].get(role, {})

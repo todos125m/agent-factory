@@ -460,7 +460,7 @@ var GUIDE = {
     {id:'computer', steps:[{n:1, code:'ollama pull qwen2.5:7b'}, {n:2}, {n:3, code:'OLLAMA_BASE_URL=http://host.docker.internal:11434'}, {n:6}, {n:7}]},
     {id:'docker', steps:[{n:4, code:'docker compose --profile ollama up -d'}, {n:5, code:'docker compose exec ollama ollama pull qwen2.5:7b'},
       {n:5, code:'OLLAMA_BASE_URL=http://ollama:11434', same:true}, {n:6}, {n:7}]}]},
-  apikey: {steps:[{n:1, code:'ANTHROPIC_API_KEY=...'}, {n:2}, {n:3}]},
+  apikey: {steps:[{n:1}, {n:2}, {n:3}, {n:4, code:'ANTHROPIC_API_KEY=...'}]},
   roles: {steps:[{n:1}, {n:2}, {n:3}, {n:4}]},
   first: {steps:[{n:1}, {n:2}, {n:3}, {n:4}, {n:5}]},
   workflow: {steps:[{n:1}, {n:2}, {n:3}]},
@@ -491,6 +491,20 @@ function resetRoutes(values, method){
   values.models = models;
   if (!Object.keys(models).length) delete values.models;
 }
+
+// The providers the key box knows: Anthropic's own protocol, OpenAI's, and the others that speak the OpenAI protocol at
+// their own address ("other": any address from a provider's docs). `model` is only a hint of what a name looks like.
+var KEY_PROVIDERS = [
+  {id:'anthropic', name:'Anthropic', native:true},
+  {id:'openai', name:'OpenAI', model:'gpt-5-mini'},
+  {id:'google', name:'Google Gemini', url:'https://generativelanguage.googleapis.com/v1beta/openai', model:'gemini-2.5-flash'},
+  {id:'openrouter', name:'OpenRouter', url:'https://openrouter.ai/api/v1', model:'vendor/model-name:free'},
+  {id:'groq', name:'Groq', url:'https://api.groq.com/openai/v1', model:'openai/gpt-oss-20b'},
+  {id:'mistral', name:'Mistral', url:'https://api.mistral.ai/v1', model:'mistral-small-latest'},
+  {id:'cerebras', name:'Cerebras', url:'https://api.cerebras.ai/v1', model:''},
+  {id:'github', name:'GitHub Models', url:'https://models.github.ai/inference', model:'openai/gpt-4.1-mini'},
+  {id:'other', name:'', model:''}
+];
 
 // "Do it here": the choice made in the guide is applied by the guide, then tested. Status comes from /setup/status.
 function connectPanel(topicId){
@@ -537,18 +551,40 @@ function connectPanel(topicId){
       if (!s.keys.available){
         slot.appendChild(el('p', {class:'notice', role:'status', text:t(s.keys.reason === 'crypto_unavailable' ? 'setup.keys_crypto' : 'setup.keys_secret')}));
       } else {
-        var name = el('input', {type:'text', maxlength:'100', 'aria-label':t('guide.connect.key_name'), value:'Anthropic'});
+        var preset = el('select', {'aria-label':t('guide.connect.provider')});
+        KEY_PROVIDERS.forEach(function(k, i){ preset.appendChild(el('option', {value:String(i)}, k.id === 'other' ? t('guide.connect.other') : k.name)); });
+        var address = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.base_url'), placeholder:'https://api.example.com/v1'});
+        var modelName = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.model')});
         // password, no autofill, no spellcheck: typed or pasted once, and the field is emptied at once
-        var key = el('input', {type:'password', autocomplete:'off', spellcheck:'false', dir:'ltr', 'aria-label':t('guide.connect.key_label'), placeholder:'sk-ant-...'});
-        slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_name'), name));
+        var key = el('input', {type:'password', autocomplete:'off', spellcheck:'false', dir:'ltr', 'aria-label':t('guide.connect.key_label'), placeholder:'sk-...'});
+        var addressRow = el('label', {class:'f'}, t('guide.connect.base_url'), address);
+        var modelRow = el('label', {class:'f'}, t('guide.connect.model'), modelName);
+        function current(){ return KEY_PROVIDERS[Number(preset.value)]; }
+        function showPreset(){
+          var k = current();
+          address.value = k.url || ''; address.readOnly = !!k.url;
+          addressRow.hidden = !(k.id === 'other' || k.url);
+          modelRow.hidden = !!k.native;
+          modelName.placeholder = k.model || '';
+          modelName.value = '';
+        }
+        preset.addEventListener('change', showPreset);
+        slot.appendChild(el('label', {class:'f'}, t('guide.connect.provider'), preset));
+        slot.appendChild(addressRow); slot.appendChild(modelRow);
         slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_label'), key));
         slot.appendChild(el('p', {class:'muted', text:t('guide.connect.key_help')}));
+        if (!admin) slot.appendChild(el('p', {class:'muted', text:t('guide.connect.address_admin')}));
+        showPreset();
         use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_apikey'), disabled: admin ? null : 'disabled'});
         use.addEventListener('click', function(){
+          var k = current();
+          var model = modelName.value.trim();
           if (!key.value) return;
-          // A second key with the untouched default name would clash with the first one: the last 4 characters tell them apart.
-          var given = name.value.trim();
-          var body = {name: (!given || given === 'Anthropic') ? 'Anthropic …' + key.value.slice(-4) : given, provider:'anthropic', key: key.value, request_id: newRequestId()};
+          if (!k.native && !model){ message.className = 'err'; message.textContent = t('guide.connect.model_needed'); return; }
+          // The default name would clash with an earlier key of the same provider: the last 4 characters tell them apart.
+          var body = {name: (k.id === 'other' ? 'API' : k.name) + ' …' + key.value.slice(-4), provider: k.native ? 'anthropic' : 'openai',
+            key: key.value, request_id: newRequestId()};
+          if (k.id === 'other' || k.url) body.base_url = address.value.trim();
           key.value = '';
           use.disabled = true; message.textContent = '';
           var cred = null;
@@ -557,7 +593,11 @@ function connectPanel(topicId){
             return changeGlobalSettings(function(v){
               resetRoutes(v, 'api_key');
               v.models = v.models || {};
-              MODEL_ROLES.forEach(function(r){ v.models[r] = Object.assign({}, v.models[r], {credential_ref: c.ref}); });
+              MODEL_ROLES.forEach(function(r){
+                var route = {credential_ref: c.ref};
+                if (!k.native){ route.provider = 'openai'; route.model = model; }  // another provider: its own model names
+                v.models[r] = Object.assign({}, v.models[r], route);
+              });
             });
           }).then(function(){ return api('/credentials/' + cred.id + '/test', {method:'POST'}); })
             .then(function(c){

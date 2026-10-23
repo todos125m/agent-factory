@@ -46,6 +46,7 @@ class ModelRequest:
     effort: str | None = None
     web_search: WebSearchConfig | None = None
     api_key: str | None = field(default=None, repr=False)  # the owner's own key for this call (app/credentials.py)
+    base_url: str | None = None  # openai provider only: another OpenAI-compatible provider's address (the key's connection)
 
 
 @dataclass

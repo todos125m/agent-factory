@@ -29,7 +29,7 @@ COPY docker/entrypoint.sh /entrypoint.sh
 # A checkout on Windows may have CRLF line endings; a shell script that has them fails to start.
 RUN tr -d '\015' < /entrypoint.sh > /entrypoint.lf && mv /entrypoint.lf /entrypoint.sh && chmod +x /entrypoint.sh
 
-RUN pip install --no-cache-dir -e ".[postgres,anthropic]"
+RUN pip install --no-cache-dir -e ".[postgres,anthropic,openai]"
 
 EXPOSE 8000
 

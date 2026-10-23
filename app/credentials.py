@@ -18,6 +18,7 @@ import hashlib
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -40,6 +41,28 @@ KDF_SALT = b"agent-factory/credentials/v1"
 KDF_ROUNDS = 200_000
 TEST_URLS = {"anthropic": "https://api.anthropic.com/v1/models", "openai": "https://api.openai.com/v1/models"}
 TEST_TIMEOUT_S = 10
+BASE_URL_MAX = 300
+# Plain http only to the machine's own servers (LM Studio, vLLM, a gateway in Docker); every other address needs https.
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "host.docker.internal")
+
+
+def clean_base_url(value: str | None) -> str | None:
+    """The address of an OpenAI-compatible provider, or None for OpenAI's own. Only an address with a host, no
+    user:password, query or fragment, and https unless it is this machine's own server."""
+    if value is None or not value.strip():
+        return None
+    value = value.strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(value)
+    try:
+        host, _ = parsed.hostname, parsed.port
+    except ValueError:
+        host = None
+    ok = (len(value) <= BASE_URL_MAX and host and parsed.scheme in ("http", "https") and not parsed.username
+          and not parsed.password and not parsed.query and not parsed.fragment and re.fullmatch(r"[\x21-\x7e]+", value)
+          and (parsed.scheme == "https" or host in LOCAL_HOSTS))
+    if not ok:
+        raise AppError(422, "credential_invalid", "That is not a usable provider address (https://host/path)", field="base_url")
+    return value
 
 
 def _headers(provider: str, key: str) -> dict[str, str]:
@@ -103,7 +126,7 @@ def load(db: Session, credential_id: int, owner: User) -> Credential:
 def view(credential: Credential) -> dict[str, Any]:
     """Everything the UI may see: never the key, not even encrypted."""
     return {"id": credential.id, "ref": f"cred:{credential.id}", "name": credential.name,
-            "provider": credential.provider, "masked": mask(credential), "revoked": credential.revoked_at is not None,
+            "provider": credential.provider, "base_url": credential.base_url, "masked": mask(credential), "revoked": credential.revoked_at is not None,
             "tested_at": credential.tested_at, "test_result": credential.test_result,
             "created_at": credential.created_at}
 
@@ -115,15 +138,22 @@ def listing(db: Session, owner: User) -> dict[str, Any]:
             "items": [view(c) for c in rows]}
 
 
-def add(db: Session, owner: User, *, name: str, provider: str, key: str, request_id: str) -> tuple[Credential, bool]:
+def add(db: Session, owner: User, *, name: str, provider: str, key: str, request_id: str,
+        base_url: str | None = None) -> tuple[Credential, bool]:
     if provider not in PROVIDERS:
         raise AppError(422, "credential_invalid", "Unknown provider", field="provider")
+    base_url = clean_base_url(base_url)
+    if base_url is not None:
+        if provider != "openai":
+            raise AppError(422, "credential_invalid", "Only an OpenAI-compatible connection has an address", field="base_url")
+        if not owner.is_admin:  # the server will send requests to this address: the admin's call, like the model settings
+            raise AppError(403, "forbidden", "Not allowed: admin_only", reason="admin_only")
     key = key.strip()
     if not (KEY_MIN <= len(key) <= KEY_MAX) or not re.fullmatch(r"[\x21-\x7e]+", key):
         raise AppError(422, "credential_invalid", "That doesn't look like an API key", field="key")  # never echoes it
     existing = db.scalar(select(Credential).where(Credential.owner_id == owner.id, Credential.request_id == request_id))
     if existing is not None:
-        if (existing.name, existing.provider, existing.last4) != (name, provider, key[-4:]):
+        if (existing.name, existing.provider, existing.last4, existing.base_url) != (name, provider, key[-4:], base_url):
             raise AppError(409, "credential_request_reused", "That request id was used for a different connection")
         return existing, False
     db.execute(select(User.id).where(User.id == owner.id).with_for_update())  # one add per owner at a time: names stay unique
@@ -132,7 +162,7 @@ def add(db: Session, owner: User, *, name: str, provider: str, key: str, request
         raise AppError(409, "credential_name_taken", f"You already have a connection named '{name}'", name=name)
     token = _fernet().encrypt(key.encode("utf-8")).decode("ascii")
     credential = Credential(owner_id=owner.id, name=name, provider=provider, ciphertext=token, last4=key[-4:],
-                            request_id=request_id)
+                            base_url=base_url, request_id=request_id)
     db.add(credential)
     try:
         db.commit()
@@ -182,7 +212,8 @@ def test(db: Session, owner: User, credential_id: int) -> Credential:
         raise AppError(409, "credential_unreadable", "This key can't be read with the server's current secret") from e
     provider = credential.provider
     db.rollback()  # nothing of this request is open while the provider answers
-    code = _http_status(TEST_URLS[provider], _headers(provider, key))
+    url = credential.base_url + "/models" if credential.base_url else TEST_URLS[provider]
+    code = _http_status(url, _headers(provider, key))
     credential = load(db, credential_id, owner)
     credential.test_result = "ok" if code == 200 else ("rejected" if code in (401, 403) else "unreachable")
     credential.tested_at = utcnow()
@@ -203,6 +234,11 @@ class CredentialNotYours(CredentialUnavailable):
 
 def key_for_call(db: Session, owner_id: int | None, ref: str, provider: str) -> str:
     """The decrypted key for a model route's reference — only for its owner's own calls and its own provider."""
+    return credential_for_call(db, owner_id, ref, provider)[0]
+
+
+def credential_for_call(db: Session, owner_id: int | None, ref: str, provider: str) -> tuple[str, str | None]:
+    """The decrypted key and the provider address (None: the provider's own) for a route's reference."""
     match = REF_PATTERN.fullmatch(str(ref))
     if match is None:
         raise CredentialUnavailable("the model route's credential reference is malformed")
@@ -216,7 +252,7 @@ def key_for_call(db: Session, owner_id: int | None, ref: str, provider: str) -> 
     if credential.provider != provider:
         raise CredentialUnavailable(f"the credential is for {credential.provider}, not {provider}")
     try:
-        return _fernet().decrypt(credential.ciphertext.encode("ascii")).decode("utf-8")
+        return _fernet().decrypt(credential.ciphertext.encode("ascii")).decode("utf-8"), credential.base_url
     except AppError as e:
         raise CredentialUnavailable(e.detail) from e
     except Exception as e:  # noqa: BLE001 - a wrong master secret (InvalidToken): say so, quote nothing

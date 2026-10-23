@@ -661,6 +661,7 @@ class Credential(Base):
     provider: Mapped[str] = mapped_column(String(20))  # anthropic | openai
     ciphertext: Mapped[str] = mapped_column(Text, default="")
     last4: Mapped[str] = mapped_column(String(4))
+    base_url: Mapped[str | None] = mapped_column(String(300))  # openai only: another OpenAI-compatible provider's address
     request_id: Mapped[str | None] = mapped_column(String(64))
     test_result: Mapped[str | None] = mapped_column(String(20))  # ok | rejected | unreachable
     tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

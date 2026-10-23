@@ -30,13 +30,19 @@ from typing import Any
 from app.gateway.providers import ModelRequest, ModelResponse, ProviderError, Usage, paid_client_limits
 
 
+def _json_text(text: str) -> str:
+    """The JSON object in a reply that may wrap it in a code fence or a sentence (other providers do)."""
+    start, end = text.find("{"), text.rfind("}")
+    return text[start:end + 1] if 0 <= start < end else text
+
+
 class OpenAIProvider:
     name = "openai"
 
     def __init__(self) -> None:
         self._client = None
 
-    def _get_client(self, api_key: str | None = None):
+    def _get_client(self, api_key: str | None = None, base_url: str | None = None):
         if api_key is None and self._client is not None:
             return self._client
         try:
@@ -44,7 +50,8 @@ class OpenAIProvider:
         except ImportError as e:
             raise ProviderError("openai package not installed: pip install -e '.[openai]'") from e
         if api_key:  # the owner's own key, for this call only: never kept on the provider
-            return openai.OpenAI(api_key=api_key, **paid_client_limits())
+            extra = {"base_url": base_url} if base_url else {}
+            return openai.OpenAI(api_key=api_key, **extra, **paid_client_limits())
         self._client = openai.OpenAI(**paid_client_limits())  # credentials from env (OPENAI_API_KEY from env)
         return self._client
 
@@ -54,24 +61,31 @@ class OpenAIProvider:
                 "this OpenAI integration has no web search capability; set model_access to "
                 "'claude_account' or 'api_key' for this role, or remove the 'web_search' tool from the agent"
             )
+        # Another provider that speaks the OpenAI protocol (a connection with an address): only what they all accept.
+        # No reasoning_effort, max_tokens, and the JSON schema goes into the prompt instead of response_format.
+        compatible = bool(request.base_url)
+        system = request.system
+        if compatible and request.json_schema:
+            system += ("\n\nReply with one JSON object only, no other text, that follows this JSON schema:\n"
+                       + json.dumps(request.json_schema))
         kwargs: dict[str, Any] = {
             "model": request.model,
-            "max_completion_tokens": request.max_output_tokens,
+            ("max_tokens" if compatible else "max_completion_tokens"): request.max_output_tokens,
             "messages": [
-                {"role": "system", "content": request.system},
+                {"role": "system", "content": system},
                 {"role": "user", "content": request.user},
             ],
         }
-        if request.json_schema:
+        if request.json_schema and not compatible:
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "response", "schema": request.json_schema, "strict": False},
             }
-        if request.effort:
+        if request.effort and not compatible:
             kwargs["reasoning_effort"] = request.effort
 
         try:
-            response = self._get_client(request.api_key).chat.completions.create(**kwargs)
+            response = self._get_client(request.api_key, request.base_url).chat.completions.create(**kwargs)
         except ProviderError:
             raise
         except Exception as e:  # the openai SDK's own exception hierarchy (auth/rate-limit/API errors)
@@ -103,7 +117,7 @@ class OpenAIProvider:
         )
 
         try:
-            data = json.loads(text) if request.json_schema and stop_reason != "max_tokens" else None
+            data = json.loads(_json_text(text) if compatible else text) if request.json_schema and stop_reason != "max_tokens" else None
         except json.JSONDecodeError as e:
             raise ProviderError(f"OpenAI returned invalid JSON for the requested schema: {text[:500]}") from e
 
