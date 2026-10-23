@@ -259,3 +259,8 @@ svg.wf-canvas .wfn-model rect,svg.wf-canvas .wfn-tool rect,svg.wf-canvas .wfn-so
 .wf-mobile-hint{display:none}
 @media (max-width: 699px){.wf-canvas-card{display:none}.wf-mobile-hint{display:block}}
 
+
+/* ---------- guide ---------- */
+.guide-topic>summary{cursor:pointer;font-weight:800;font-size:15px;min-height:32px;display:flex;align-items:center}
+.guide-topic[open]>summary{margin-bottom:10px}
+.guide-topic .stack{gap:10px}
