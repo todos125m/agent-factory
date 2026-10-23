@@ -293,9 +293,134 @@ function renderSignIn(root){
 function fetchWorkspaces(){ return api('/workspaces').then(function(ws){ STATE.workspaces = ws; return ws; }); }
 function fetchProjects(){ return api('/projects?owner_id=' + STATE.userId).then(function(ps){ STATE.projects = ps; return ps; }); }
 
+/* ============================== setup: the guide, inside the app ============================== */
+
+// What this server has for reaching a model, with the steps for the method in use. The status comes from the server
+// (app/setup.py): booleans and names, never a secret.
+function setupIncomplete(s){
+  var m = s.model;
+  // In Docker the Claude tool exists but can't log in: it needs the token. Locally the tool being there is the start.
+  if (m.access === 'claude_account') return s.server.in_docker ? !m.claude.token : !m.claude.cli;
+  if (m.access === 'api_key') return !(m.anthropic_key || m.connections.indexOf('anthropic') >= 0);
+  if (m.access === 'ollama') return !(m.ollama && m.ollama.reachable);
+  return false;
+}
+
+function codeLine(text){
+  var copy = el('button', {class:'btn ghost sm', type:'button', text:t('setup.copy')});
+  copy.addEventListener('click', function(){
+    try { navigator.clipboard.writeText(text).then(function(){ copy.textContent = t('setup.copied'); }); } catch(e){}
+  });
+  return el('div', {class:'row', style:'gap:8px;align-items:center;flex-wrap:wrap'},
+    el('code', {dir:'ltr', style:'flex:1;min-width:220px;overflow-wrap:anywhere', text:text}), copy);
+}
+function checkRow(ok, text){
+  return el('div', {class:'row', style:'gap:8px'},
+    el('span', {class:'chip ' + (ok ? 'status-COMPLETED' : 'status-FAILED'), text: (ok ? '✓ ' : '✗ ') + (ok ? t('setup.ok') : t('setup.missing'))}),
+    el('span', {text:text}));
+}
+
+function renderSetup(root){
+  root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('setup.title')})));
+  var body = el('div', {class:'stack'});
+  root.appendChild(body);
+  body.appendChild(loadingBox());
+  function load(){
+    api('/setup/status').then(function(s){ draw(s); })
+      .catch(function(e){ clear(body); body.appendChild(errorBox(e.message, load)); });
+  }
+
+  function modelCard(s){
+    var m = s.model, docker = s.server.in_docker;
+    var card = el('div', {class:'card stack'}, el('h3', {text:t('setup.step_model')}),
+      el('p', {}, el('b', {text:t('setup.method') + ': '}), lbl('access', m.access)),
+      el('p', {class:'muted', text:t('setup.change_method')}));
+    var steps = el('div', {class:'stack'});
+    if (m.access === 'claude_account'){
+      steps.appendChild(checkRow(m.claude.cli, t('setup.check_cli')));
+      steps.appendChild(checkRow(m.claude.token, t('setup.check_token')));
+      if (docker){
+        steps.appendChild(el('b', {text:t('setup.claude_docker_title')}));
+        steps.appendChild(el('p', {text:'1. ' + t('setup.claude_docker_1')})); steps.appendChild(codeLine('claude setup-token'));
+        steps.appendChild(el('p', {text:'2. ' + t('setup.claude_docker_2')}));
+        steps.appendChild(el('p', {text:'3. ' + t('setup.claude_docker_3')})); steps.appendChild(codeLine('CLAUDE_CODE_OAUTH_TOKEN=...'));
+        steps.appendChild(el('p', {text:'4. ' + t('setup.claude_docker_4')})); steps.appendChild(codeLine('docker compose up -d'));
+      } else {
+        steps.appendChild(el('b', {text:t('setup.claude_local_title')}));
+        steps.appendChild(el('p', {text:'1. ' + t('setup.claude_local_1')})); steps.appendChild(codeLine('claude'));
+        steps.appendChild(el('p', {text:'2. ' + t('setup.claude_local_2')}));
+      }
+    } else if (m.access === 'api_key'){
+      steps.appendChild(checkRow(m.anthropic_key || m.connections.indexOf('anthropic') >= 0, t('setup.check_anthropic')));
+      steps.appendChild(el('b', {text:t('setup.apikey_title')}));
+      steps.appendChild(el('p', {text:'A. ' + t('setup.apikey_a')})); steps.appendChild(codeLine('ANTHROPIC_API_KEY=...'));
+      steps.appendChild(el('p', {text:'B. ' + t('setup.apikey_b')}));
+      steps.appendChild(el('p', {text:t('setup.apikey_c')}));
+    } else if (m.access === 'ollama'){
+      var o = m.ollama || {reachable:false, models:[], missing:[], url:''};
+      steps.appendChild(checkRow(o.reachable, t('setup.check_ollama', {url: o.url})));
+      if (o.reachable) steps.appendChild(el('p', {class:'muted', text:t('setup.check_ollama_models', {models: o.models.join(', ') || '—'})}));
+      if (o.reachable && o.missing.length) steps.appendChild(el('p', {class:'err', text:t('setup.ollama_missing', {models: o.missing.join(', ')})}));
+      steps.appendChild(el('b', {text:t('setup.ollama_title')}));
+      steps.appendChild(el('p', {text:'1. ' + t('setup.ollama_1')}));
+      steps.appendChild(codeLine('ollama pull ' + ((o.missing && o.missing[0]) || 'qwen2.5:7b')));
+      steps.appendChild(el('p', {text:'2. ' + t('setup.ollama_2')}));
+      if (docker){ steps.appendChild(el('p', {text:'3. ' + t('setup.ollama_3_docker')})); steps.appendChild(codeLine('OLLAMA_BASE_URL=http://host.docker.internal:11434')); }
+      steps.appendChild(el('p', {class:'muted', text:t('setup.ollama_note')}));
+    }
+    card.appendChild(steps);
+
+    var result = el('div', {class:'stack', role:'status'});
+    var test = el('button', {class:'btn', type:'button', text:t('setup.test'), disabled: s.is_admin ? null : 'disabled'});
+    test.addEventListener('click', function(){
+      test.disabled = true; clear(result); result.appendChild(el('p', {class:'muted', text:t('setup.testing')}));
+      api('/setup/test-model', {method:'POST'}).then(function(r){
+        clear(result);
+        if (r.ok){
+          result.appendChild(el('p', {class:'chip status-COMPLETED', text:'✓ ' + t('setup.test_ok', {reply: r.reply, provider: r.provider, model: r.model, seconds: fmtNum(Math.round((r.duration_ms || 0) / 100) / 10)})}));
+        } else {
+          result.appendChild(el('p', {class:'err', text:t('setup.test_failed')}));
+          result.appendChild(el('pre', {class:'code', dir:'ltr', text:r.error}));
+          result.appendChild(el('p', {class:'muted', text:t('setup.test_hint')}));
+        }
+        test.disabled = false;
+      }).catch(function(e){ clear(result); result.appendChild(el('p', {class:'err', text:e.message})); test.disabled = false; });
+    });
+    card.appendChild(el('div', {class:'btn-row'}, test,
+      el('button', {class:'btn ghost', type:'button', onclick:function(){ go('settings'); }}, t('setup.open_settings'))));
+    card.appendChild(el('p', {class:'muted', text: s.is_admin ? t('setup.test_help') : t('setup.test_admin_only')}));
+    card.appendChild(result);
+    return card;
+  }
+
+  function draw(s){
+    clear(body);
+    body.appendChild(el('p', {class:'muted', text:t('setup.intro')}));
+    body.appendChild(modelCard(s));
+
+    var keys = el('div', {class:'card stack'}, el('h3', {text:t('setup.step_keys')}));
+    if (s.keys.available) keys.appendChild(el('p', {text:'✓ ' + t('setup.keys_ok')}));
+    else keys.appendChild(el('p', {class:'err', text:'✗ ' + (s.keys.reason === 'crypto_unavailable' ? t('setup.keys_crypto') : t('setup.keys_secret'))}));
+    keys.appendChild(el('p', {class:'muted', text:t('setup.keys_backup')}));
+    body.appendChild(keys);
+
+    body.appendChild(el('div', {class:'card stack'}, el('h3', {text:t('setup.step_people')}), el('p', {text:t('setup.people_text')}),
+      el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('settings'); }}, t('setup.open_settings')))));
+    body.appendChild(el('div', {class:'card stack'}, el('h3', {text:t('setup.step_first')}), el('p', {text:t('setup.first_text')}),
+      el('div', {class:'btn-row'}, el('button', {class:'btn', type:'button', onclick:function(){ go('agents/new'); }}, t('setup.first_go')))));
+
+    var server = el('div', {class:'card stack'}, el('h3', {text:t('setup.server')}),
+      el('p', {class:'muted', text:t('setup.server_db', {db: s.server.database}) + (s.server.in_docker ? ' · ' + t('setup.server_docker') : '') +
+        ' · ' + t('setup.server_workers', {n: fmtNum(s.server.workers)})}));
+    if (s.server.behind_proxy) server.appendChild(el('p', {class:'muted', text:t('setup.server_proxy')}));
+    body.appendChild(server);
+  }
+  load();
+}
+
 /* ============================== router ============================== */
 
-var PAGES = ['dashboard','inbox','projects','agents','build','workflows','workflow','benchmark','settings','observability'];
+var PAGES = ['dashboard','setup','inbox','projects','agents','build','workflows','workflow','benchmark','settings','observability'];
 var root;
 
 function setNav(page){
@@ -323,6 +448,7 @@ function route(){
   clear(root);
   refreshInboxBadge();
   if (page === 'dashboard') renderDashboard(root);
+  else if (page === 'setup') renderSetup(root);
   else if (page === 'inbox') renderInbox(root);
   else if (page === 'projects' && parts[1]) renderProjectDetail(root, Number(parts[1]));
   else if (page === 'projects') renderProjectsList(root);
@@ -504,8 +630,17 @@ function renderDashboard(root){
   }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message, function(){ clear(root); renderDashboard(root); })); });
 }
 
+function setupHint(body){
+  api('/setup/status').then(function(s){
+    if (!setupIncomplete(s)) return;
+    body.insertBefore(el('div', {class:'card stack notice', role:'status'}, el('b', {text:t('setup.dash_title')}), el('p', {text:t('setup.dash_text')}),
+      el('div', {class:'btn-row'}, el('button', {class:'btn', type:'button', onclick:function(){ go('setup'); }}, t('setup.dash_go')))), body.firstChild);
+  }).catch(function(){});
+}
+
 function renderDashboardBody(body, projects, usages, events){
   clear(body);
+  setupHint(body);
   if (!projects.length){
     body.appendChild(emptyBox('📊', t('dashboard.empty_title'), t('dashboard.empty_sub')));
     body.appendChild(el('button', {class:'btn', onclick:function(){ go('projects'); }}, t('dashboard.create_first')));
