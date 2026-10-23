@@ -31,9 +31,11 @@ def system_prompt(session: Session, agent: Agent, skills: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def agent_directory(session: Session) -> str:
-    """One compact line per active agent — what the manager needs to delegate."""
-    agents = session.scalars(select(Agent).where(Agent.active).order_by(Agent.name))
+def agent_directory(session: Session, owner_id: int) -> str:
+    """One compact line per active agent this owner may use — what the manager needs to delegate."""
+    from app.registry import visible_agents
+
+    agents = session.scalars(visible_agents(owner_id).where(Agent.active))
     return "\n".join(f"- {a.name}: {', '.join(a.capabilities)}" for a in agents)
 
 
@@ -51,7 +53,7 @@ def _summary(output: dict[str, Any] | None, limit: int) -> str:
 
 
 def task_context(
-    session: Session, task: Task, *, extra: str = "", settings: dict[str, Any] | None = None
+    session: Session, task: Task, *, extra: str = "", settings: dict[str, Any] | None = None, isolated: bool = False
 ) -> str:
     """`settings` lets a caller that already resolved layered settings for this task (e.g.
     app/manager.py::run_task, which also needs "mode") reuse it instead of resolving twice."""
@@ -78,7 +80,9 @@ def task_context(
     # from an earlier run (memory is captured only after a run completes, always after this call
     # runs for that same execution), so on a redo (the reviewer's COMPLETED -> READY loop) the agent
     # should see what it found last time, not lose it.
-    memories = session.scalars(
+    # `isolated` (a run an outside caller started, app/external.py): the owner's project memory and past decisions are
+    # not its context — whatever it is made to say goes back to that caller.
+    memories = [] if isolated else session.scalars(
         select(MemoryItem)
         .where(MemoryItem.project_id == task.project_id)
         .order_by(MemoryItem.id.desc())
@@ -99,7 +103,7 @@ def task_context(
         sections.append("Results from earlier tasks:\n" + "\n".join(
             f"- {d.title}: {_summary(d.output, per_dep)}" for d in deps
         ))
-    decisions = session.scalars(
+    decisions = [] if isolated else session.scalars(
         select(RunEvent)
         .where(RunEvent.project_id == task.project_id, RunEvent.type.like("decision.%"))
         .order_by(RunEvent.id.desc())

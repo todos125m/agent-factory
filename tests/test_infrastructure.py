@@ -172,7 +172,7 @@ def test_system_prompt_loads_only_requested_granted_skills(session):
     assert prompt == system_prompt(session, manager, ["plan-goal"])  # stable → cacheable
     with pytest.raises(ContextError):
         system_prompt(session, manager, ["not-granted"])
-    assert "- manager: planning" in agent_directory(session)
+    assert "- manager: planning" in agent_directory(session, 1)
 
 
 def test_task_context_includes_only_dependencies_and_respects_cap(session):

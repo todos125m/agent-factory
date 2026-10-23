@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_va
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import context, memory, preferences, settings_layers, sources, storable
+from app import context, memory, preferences, registry, settings_layers, sources, storable
 from app.errors import AppError
 from app.events import record_event
 from app.gateway.service import Gateway
@@ -199,7 +199,7 @@ def _plan_user_content(session: Session, project: Project, feedback: str | None)
         f"Max steps: {settings['max_steps']}",
         f"Budget: ${settings['budget']['project_usd']}",
         "Available agents:",
-        context.agent_directory(session),
+        context.agent_directory(session, project.owner_id),
     ]
     if feedback:
         lines.append(f"Feedback on the previous plan — revise accordingly: {feedback}")
@@ -244,9 +244,7 @@ def _add_plan(session: Session, project: Project, plan: PlanIn) -> dict[str, Any
     task_ids: list[int] = []
     specialists_requested: list[str] = []
     for step in plan.steps:
-        agent = None if step.agent == "manager" else session.scalar(
-            select(Agent).where(Agent.name == step.agent, Agent.active)
-        )
+        agent = None if step.agent == "manager" else registry.agent_for(session, step.agent, project.owner_id)
         task = Task(project_id=project.id, title=step.title, owner=step.agent, input={"goal": step.goal}, risk=step.risk)
         if agent is None:
             # Kept in the graph with every dependency, BLOCKED: what depends on it can't start without it (issue #2
@@ -474,7 +472,7 @@ def run_task(session: Session, gateway: Gateway, project: Project, task: Task) -
 
     if not task.owner:
         raise ManagerError("task has no owner agent")
-    agent = session.scalar(select(Agent).where(Agent.name == task.owner, Agent.active))
+    agent = registry.agent_for(session, task.owner, project.owner_id)
     if agent is None:
         raise ManagerError(f"agent '{task.owner}' is not registered")
 
@@ -532,8 +530,7 @@ def unblock(session: Session, project: Project, task: Task) -> dict[str, Any]:
     was approved (a plan still pending decides that itself). 409 while the specialist is still missing."""
     if task.status is not TaskStatus.BLOCKED:
         raise TransitionError(f"Task is {task.status.value}, not BLOCKED")
-    agent = None if task.owner == "manager" else session.scalar(
-        select(Agent).where(Agent.name == task.owner, Agent.active))
+    agent = None if task.owner == "manager" else registry.agent_for(session, task.owner, project.owner_id)
     if agent is None:
         raise AppError(409, "missing_specialist", f"Specialist '{task.owner}' is still not registered", agent=task.owner)
     check_task_move(session, task, TaskStatus.CREATED, dependency_statuses=[])

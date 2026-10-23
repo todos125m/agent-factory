@@ -30,24 +30,63 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR7: external API — scoped keys that run one activated agent version of yours inside limits you set. PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). all 7 PRs done | ✅ PR7 |
+| Human-guided factory (Issue #2) | All seven PRs + hardening: fa/en/tr UI and settings axes, sign-in, versioned brief and approvals, blueprint canvas, bounded runs with workers, build → evaluate → activate with rollback, typed workflows, encrypted provider keys, external API with scoped keys. Details below and in `docs/HUMAN_GUIDED_FACTORY.md` | ✅ |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
-## Run locally
+## Getting started
+
+> **Not a developer?** The step-by-step user guide (in Persian) — install, connect a model (your Claude account, an API key or a local Ollama), accounts and devices, your first agent, the API — is [`docs/USER_GUIDE.fa.md`](docs/USER_GUIDE.fa.md).
+
+### 1. Run it locally (SQLite, nothing else needed)
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload     # http://localhost:8000/docs, http://localhost:8000/app for the UI
-pytest
+python -m venv .venv
+source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"            # re-run after pulling: new dependencies (cryptography) arrive this way
+uvicorn app.main:app --reload      # API docs: http://localhost:8000/docs   UI: http://localhost:8000/app
+pytest                             # 1100+ tests, none of them calls a real model
 ```
 
-The UI (`/app`) creates the server's first account (its admin) automatically on first open (no setup step); see
-"Sign-in" below for every later device and account. It is an installable
-PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gives it its own icon.
+The database is created and migrated on startup (`agent_factory.db` next to where you run it). Python 3.11 or newer.
+**Locally the app reads real environment variables, not the `.env` file** (only `docker compose` reads `.env`): set what
+you need in the shell before `uvicorn`, e.g. `export AGENT_FACTORY_SECRET_KEY=...` (PowerShell:
+`$env:AGENT_FACTORY_SECRET_KEY = "..."`). Every setting has a safe default, so nothing is needed for a first look.
 
-Uses SQLite by default. For PostgreSQL: `pip install -e ".[postgres]"` and set `DATABASE_URL`
-(see `.env.example`).
+### 2. First run, in the UI (`/app`)
+
+1. Open `/app`. The first visitor gets the server's first account — the **admin** (no sign-up step). Pick the language
+   (فارسی / English / Türkçe); it can be changed any time in Settings.
+2. **Give it a model** (Settings → models, or `.env`): the default `model_access` is `claude_account` (your own Claude
+   subscription via the Claude Code CLI: run `claude` once and log in); or set `ANTHROPIC_API_KEY` for `api_key`; or
+   run Ollama locally. Nothing paid happens until you press a button that says it will call a model.
+3. **Optional — keep a provider key in the app:** Settings → Connections needs `AGENT_FACTORY_SECRET_KEY` first (see the
+   table below); otherwise the page says "keys can't be kept" and tells you why.
+4. Build your first agent: **Agents → New agent** (interview → brief → design canvas → Build → Evaluate → Activate).
+   Connect agents on **Workflows**; let a program call one through **Settings → API keys**.
+
+### 3. Settings that matter (environment variables — in `.env` for Docker; `.env.example` lists them all)
+
+| Variable | Needed for | Notes |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL | unset = SQLite. `pip install -e ".[postgres]"` first |
+| `AGENT_FACTORY_SECRET_KEY` | keeping provider keys (Settings → Connections) | ≥32 characters, ≥12 different; generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. **Back it up**: without it stored keys can't be read |
+| `AGENT_FACTORY_WORKERS` | step-by-step runs | threads inside the app (default 1). `0` + `python -m app.worker` to run them as a separate process |
+| `AGENT_FACTORY_OWNER_TOKEN` | taking over an account made before sign-in existed, from anywhere but the server itself | optional |
+| `AGENT_FACTORY_BEHIND_PROXY=1` | **set it whenever a reverse proxy / load balancer fronts the server** | turns the "claim from this machine" shortcut off and makes the cookie always `Secure` |
+| `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY` | the model access you chose | see "Model access" |
+
+### 4. Production notes
+
+- Use PostgreSQL 16 and HTTPS. Behind a proxy set `AGENT_FACTORY_BEHIND_PROXY=1` and limit request rates there too (the app throttles
+  failed API-key attempts itself, per process only).
+- Update = pull, `pip install -e ".[postgres,anthropic]"`, restart: migrations run at startup (idempotent).
+- Changing `AGENT_FACTORY_SECRET_KEY`: put the new one in it and the old one in `AGENT_FACTORY_SECRET_KEY_PREVIOUS`, run
+  `python -m app.credentials rotate`, then empty the old one.
+- Troubleshooting: *"keys can't be kept"* → set the secret / `pip install -e .`; *runs stay "queued"* → workers are off
+  (`AGENT_FACTORY_WORKERS=0` without a separate `python -m app.worker`), or the project is paused; *a tool waits* → open the
+  decision inbox, it is waiting for you by design.
+
+The UI is an installable PWA (`web/manifest.json`, `web/icon.svg`) — "Add to Home Screen" on a phone gives it its own icon.
 
 ### SQLite vs PostgreSQL: what a column refuses
 
@@ -62,20 +101,23 @@ test, every engine), and `tests/test_column_limits.py` audits every `String(n)` 
 until its writers are classified. `AGENT_FACTORY_TEST_PG_URL=postgresql+psycopg://… pytest tests/test_postgres_parity.py`
 re-checks all of it against a real server (each test in a schema of its own, dropped afterwards).
 
-There are no migrations yet (`create_all` only creates missing tables), so a column widened later is widened in an
-existing PostgreSQL database at startup by `app/db.py::ensure_column_lengths` — like `ensure_indexes`: idempotent,
-widen-only, never shrinking.
+Migrations (Alembic) keep the schema in step; `app/db.py::ensure_column_lengths` and `ensure_indexes` remain as idempotent safety nets at startup.
 
 ## Run with Docker
 
 ```bash
-cp .env.example .env   # add ANTHROPIC_API_KEY once you have one
+cp .env.example .env
+# edit .env: at least AGENT_FACTORY_SECRET_KEY (to keep provider keys) and your model access (CLAUDE_CODE_OAUTH_TOKEN
+# or ANTHROPIC_API_KEY); keep DATABASE_URL pointing at the "postgres" service
 docker compose up --build
-# http://localhost:8000/docs
+# UI: http://localhost:8000/app    API docs: http://localhost:8000/docs
 ```
 
-Starts the API and a `postgres:16` container together (with a persisted volume and healthcheck).
-The `api` service reads `DATABASE_URL` and `ANTHROPIC_API_KEY` from `.env`.
+Starts the API and a `postgres:16` container together (persisted volume, healthcheck). The database is published on
+`127.0.0.1` only; the API on port 8000. The `api` service reads everything from `.env` (workers run inside it; see
+`AGENT_FACTORY_WORKERS`). Migrations run at startup. Put HTTPS and a reverse proxy in front before exposing it, and set
+`AGENT_FACTORY_BEHIND_PROXY=1` when you do. A browser outside the container is not "this machine": an account from before
+sign-in existed is taken over with `AGENT_FACTORY_OWNER_TOKEN`.
 
 ## Phase 1 API
 
@@ -274,7 +316,7 @@ curl -X POST http://localhost:8000/api/v1/runs/42/answer -H "Authorization: Bear
 | POST | `/api/v1/runs/{id}/cancel` | stop the run |
 | GET/POST/DELETE | `/api-keys` | the owner's side (session): list, make (secret once), revoke |
 
-Put a rate limit in front of the server (proxy/WAF) for failed key attempts; the secret has 256 bits, but the API does not throttle.
+More than 20 failed key attempts a minute from one address get 429 before any lookup (in this process's memory; a good key is never counted). A proxy/WAF in front is still wise across processes.
 
 ### Connections: your own API keys (issue #2 PR6b)
 
@@ -283,7 +325,7 @@ Settings → Connections keeps a provider key (Anthropic, OpenAI) **encrypted** 
 reference, `cred:<id>`, chosen per model role in the model settings; the key is used only for its owner's own calls and
 its own provider, and never appears in a log, event, error, settings layer, blueprint or workflow. *Test* makes one free
 request to the provider's own list-models endpoint, only when pressed, and shows what came back. Revoking wipes the key.
-**Setup:** set `AGENT_FACTORY_SECRET_KEY` (at least 32 characters, see `.env.example`) and `pip install -e .` (the new
+**Setup:** set `AGENT_FACTORY_SECRET_KEY` (at least 32 characters, 12 different, see `.env.example`; to change it later, `AGENT_FACTORY_SECRET_KEY_PREVIOUS` + `python -m app.credentials rotate`) and `pip install -e .` (the new
 `cryptography` dependency); without them keys can't be added and the page says why. Back the secret up: without it stored
 keys can't be read.
 

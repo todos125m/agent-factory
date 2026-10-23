@@ -7,7 +7,8 @@ from app.auth import current_user, require_admin
 from app.db import get_session
 from app.errors import AppError, not_found
 from app.models import Agent, Feedback, Project, Skill, User
-from app.registry import AgentSpec, RegistryError, find_by_capability, upsert_agent
+from app import registry
+from app.registry import AgentSpec, RegistryError, find_by_capability, upsert_agent, visible_agents
 from app.schemas import AgentOut, FeedbackOut, SkillOut, SkillSummary
 
 router = APIRouter(tags=["registry"])
@@ -16,13 +17,13 @@ router = APIRouter(tags=["registry"])
 @router.get("/agents", response_model=list[AgentOut])
 def list_agents(capability: str | None = None, session: Session = Depends(get_session), me: User = Depends(current_user)):
     if capability:
-        return find_by_capability(session, capability)
-    return session.scalars(select(Agent).order_by(Agent.name)).all()
+        return find_by_capability(session, capability, me.id)
+    return session.scalars(visible_agents(me.id)).all()
 
 
 @router.get("/agents/{name}", response_model=AgentOut)
 def get_agent(name: str, session: Session = Depends(get_session), me: User = Depends(current_user)):
-    agent = session.scalar(select(Agent).where(Agent.name == name))
+    agent = registry.agent_for(session, name, me.id, active=False)
     if not agent:
         raise not_found("agent")
     return agent

@@ -14,6 +14,7 @@ through a key the owner made, inside limits the owner set — and can do nothing
 
 import hashlib
 import secrets
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -46,6 +47,36 @@ API_STATES = {"queued", "running", "waiting", "completed", "stopped"}
 
 def _digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+class FailureLimiter:
+    """A sliding window of failed key attempts per client address, in this process's memory (one process = one limit; a
+    proxy in front still limits across processes). A client over the limit gets 429 before any lookup; a good key is
+    never counted. The address is the connection's own: X-Forwarded-For is not trusted (a client could send any)."""
+
+    def __init__(self, limit: int = 20, window: timedelta = timedelta(minutes=1), max_clients: int = 10_000) -> None:
+        self.limit, self.window, self.max_clients = limit, window, max_clients
+        self.failures: dict[str, list[float]] = {}
+
+    def _recent(self, client: str, now: float) -> list[float]:
+        recent = [t for t in self.failures.get(client, []) if now - t < self.window.total_seconds()]
+        if recent:
+            self.failures[client] = recent
+        else:
+            self.failures.pop(client, None)
+        return recent
+
+    def blocked(self, client: str, now: float) -> bool:
+        return len(self._recent(client, now)) >= self.limit
+
+    def fail(self, client: str, now: float) -> None:
+        if len(self.failures) >= self.max_clients and client not in self.failures:
+            for other in list(self.failures)[: self.max_clients // 10]:  # the oldest tenth: memory stays bounded
+                self.failures.pop(other, None)
+        self.failures.setdefault(client, []).append(now)
+
+
+FAILED_KEYS = FailureLimiter()
 
 
 def invalid_key() -> AppError:
@@ -138,12 +169,18 @@ def revoke(db: Session, owner: User, key_id: int) -> ApiKey:
 
 def current_key(request: Request, db: Session = Depends(get_session)) -> ApiKey:
     """The key behind `Authorization: Bearer <key>`, or the one 401."""
+    now = time.monotonic()
+    client = request.client.host if request.client else "unknown"
+    if FAILED_KEYS.blocked(client, now):
+        raise AppError(429, "too_many_attempts", "Too many failed attempts; wait a minute")
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.startswith(TOKEN_PREFIX) or len(token) > 200:
+        FAILED_KEYS.fail(client, now)
         raise invalid_key()
     key = db.scalar(select(ApiKey).where(ApiKey.token_hash == _digest(token.strip())))
     if key is None or key.revoked_at is not None:
+        FAILED_KEYS.fail(client, now)
         raise invalid_key()
     if key.last_used_at is None or utcnow() - runtime._aware(key.last_used_at) > timedelta(minutes=5):
         key.last_used_at = utcnow()

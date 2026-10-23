@@ -334,3 +334,47 @@ def test_a_builds_call_uses_the_builds_owners_key(client, session_factory):
     with session_factory() as s:
         gateway(s, fake).call("research", system="s", user="u", factory_session_id=st["session"]["id"])
     assert fake.keys == [KEY]
+
+
+# ---------- rotating the master secret ----------
+
+OLD = "the-old-master-secret-of-more-than-32-chars"
+NEW = "the-new-master-secret-of-more-than-32-chars"
+
+
+def test_rotation_moves_every_key_to_the_new_secret_and_loses_none(client, session_factory, monkeypatch):
+    monkeypatch.setenv(credentials.SECRET_ENV, OLD)
+    a, b = made(client, name="A"), made(client, name="B", key="sk-test-second-key-0123456789ABCD")
+    revoked = made(client, name="C")
+    client.delete(f"/credentials/{revoked['id']}")
+
+    # the new secret alone can't read them; with the old one as "previous" it can
+    monkeypatch.setenv(credentials.SECRET_ENV, NEW)
+    with session_factory() as s:
+        owner = s.get(Credential, a["id"]).owner_id
+        with pytest.raises(credentials.CredentialUnavailable):
+            credentials.key_for_call(s, owner, a["ref"], "anthropic")
+    monkeypatch.setenv(credentials.PREVIOUS_ENV, OLD)
+    with session_factory() as s:
+        assert credentials.key_for_call(s, owner, a["ref"], "anthropic") == KEY
+        assert credentials.rotate(s) == {"rotated": 2, "unreadable": 0}  # the revoked one is not touched
+        assert credentials.rotate(s) == {"rotated": 2, "unreadable": 0}  # and again: nothing breaks
+
+    # now the old secret is no longer needed
+    monkeypatch.delenv(credentials.PREVIOUS_ENV)
+    with session_factory() as s:
+        assert credentials.key_for_call(s, owner, a["ref"], "anthropic") == KEY
+        assert credentials.key_for_call(s, owner, b["ref"], "anthropic") == "sk-test-second-key-0123456789ABCD"
+    # new keys are made under the new secret
+    assert add(client, name="D").status_code == 201
+
+
+def test_a_key_neither_secret_opens_is_counted_and_left_alone(client, session_factory, monkeypatch):
+    monkeypatch.setenv(credentials.SECRET_ENV, OLD)
+    c = made(client)
+    monkeypatch.setenv(credentials.SECRET_ENV, NEW)
+    monkeypatch.setenv(credentials.PREVIOUS_ENV, "some-third-secret-that-is-long-enough-xx")
+    with session_factory() as s:
+        before = s.get(Credential, c["id"]).ciphertext
+        assert credentials.rotate(s) == {"rotated": 0, "unreadable": 1}
+        assert s.get(Credential, c["id"]).ciphertext == before
