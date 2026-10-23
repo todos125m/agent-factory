@@ -512,6 +512,7 @@ class Run(Base):
     renews each step; a lease that ran out means the worker stopped, and another one recovers the run."""
 
     __tablename__ = "runs"
+    __table_args__ = (UniqueConstraint("api_key_id", "api_request_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -533,6 +534,9 @@ class Run(Base):
     lease_owner: Mapped[str | None] = mapped_column(String(64))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # Started through an external API key (app/external.py): which key, and the caller's idempotency id.
+    api_key_id: Mapped[int | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    api_request_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -662,3 +666,27 @@ class Credential(Base):
     tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApiKey(Base):
+    """A key an outside program calls the external API with (app/external.py). Making it is the owner's standing approval
+    of one activated agent version, one project, its scopes and its limits. Only the SHA-256 of the secret is kept."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    prefix: Mapped[str] = mapped_column(String(12))  # the first characters, to recognise the key by
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    agent_name: Mapped[str] = mapped_column(String(100))
+    agent_version: Mapped[int] = mapped_column(Integer)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)  # run | read | answer
+    max_runs_per_day: Mapped[int] = mapped_column(Integer)
+    budget_per_run_usd: Mapped[float] = mapped_column(Float)
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

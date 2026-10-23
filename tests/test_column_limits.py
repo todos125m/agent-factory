@@ -14,6 +14,7 @@ as a 422 naming the field. FakeProvider only.
 
 import ast
 import json
+import uuid
 import re
 from collections import namedtuple
 from pathlib import Path
@@ -48,6 +49,37 @@ JSON_HEADERS = {"content-type": "application/json"}
 def send(client, method, path, body):
     """The body as raw JSON text: an ASCII-escaped lone surrogate or a bare NaN, which httpx's own encoder refuses."""
     return client.request(method, path, content=json.dumps(body), headers=JSON_HEADERS)
+
+
+def _key_body(c) -> dict:
+    """A body that makes an API key for a real, active, built agent (rows written directly: the audit is of lengths)."""
+    from app.models import Agent, AgentVersion, FactorySession, Project, User
+
+    from app.db import get_session
+
+    sessions = api.dependency_overrides[get_session]()  # the test's own database, whichever client this is
+    s = next(sessions)
+    try:
+        owner = s.scalar(select(User).order_by(User.id.desc()))
+        project = s.scalar(select(Project).where(Project.owner_id == owner.id))
+        if s.scalar(select(Agent.id).where(Agent.name == "audit-agent")) is None:
+            fs = FactorySession(owner_id=owner.id, title="audit", locale="en", interaction_policy="step_by_step",
+                               quality_target="prototype")
+            s.add_all([Agent(name="audit-agent", version=1, description="d", model_role="research", capabilities=["audit"],
+                             tools=[], permissions={}, skills=[], instructions="i", active=True), fs])
+            s.flush()
+            s.add(AgentVersion(session_id=fs.id, agent_name="audit-agent", version=1, blueprint_version=1,
+                               spec={"description": "d"}, state="active", created_by=owner.id))
+            s.commit()
+        return {"agent": "audit-agent", "agent_version": 1, "project_id": project.id}
+    finally:
+        sessions.close()
+
+
+def _external_token(c, x) -> str:
+    created = c.request("POST", "/api-keys", content=json.dumps({
+        **_key_body(c), "name": "audit", "max_runs_per_day": 1000, "request_id": "extkey-" + uuid.uuid4().hex}), headers=JSON_HEADERS)
+    return created.json()["secret"]
 
 
 def limited_columns() -> dict[tuple[str, str], int]:
@@ -97,6 +129,15 @@ API = {
         lambda c, x, v: send(c, "POST", "/factory/sessions", {"request_id": v}), "request_id"),
     ("workflows", "name"): (
         lambda c, x, v: send(c, "POST", "/workflows", {"name": v, "request_id": f"wfname-{len(v):06d}"}), "name"),
+    ("api_keys", "name"): (
+        lambda c, x, v: send(c, "POST", "/api-keys", {**_key_body(c), "name": v, "request_id": f"keyname-{len(v):06d}"}),
+        "name"),
+    ("api_keys", "request_id"): (
+        lambda c, x, v: send(c, "POST", "/api-keys", {**_key_body(c), "name": "n", "request_id": v}), "request_id"),
+    ("runs", "api_request_id"): (
+        lambda c, x, v: c.request("POST", "/api/v1/runs", content=json.dumps({"input": "hello", "request_id": v}),
+                                  headers={**JSON_HEADERS, "Authorization": "Bearer " + _external_token(c, x)}),
+        "request_id"),
     ("credentials", "name"): (
         lambda c, x, v: send(c, "POST", "/credentials", {"name": v, "provider": "anthropic", "key": "k" * 24,
                                                          "request_id": f"credname-{len(v):06d}"}), "name"),
@@ -122,7 +163,8 @@ DERIVED = {
     ("memory_items", "title"): ("tasks", "title"),
     ("learning_traces", "concept"): ("tasks", "title"),
     ("runs", "agent"): ("agents", "name"),
-    ("agent_versions", "agent_name"): ("agents", "name"),  # the design's agent_core.name, the registry's pattern  # the run's snapshot of its agent (app/runtime.py::start)
+    ("agent_versions", "agent_name"): ("agents", "name"),
+    ("api_keys", "agent_name"): ("agents", "name"),  # an activated agent's name (app/external.py::_check_agent)  # the design's agent_core.name, the registry's pattern  # the run's snapshot of its agent (app/runtime.py::start)
 }
 
 # Written from files in registry/ at startup: a longer value is a RegistryError naming the file, not a database error.
@@ -164,6 +206,8 @@ CLOSED = {
     ("tool_executions", "idempotency_key"): lambda: {
         f"run{'9' * 10}:step{'9' * 10}:{max(runtime.TOOLS, key=len)}:{'f' * 16}"},
     ("tool_executions", "state"): lambda: runtime.EXECUTION_STATES,
+    ("api_keys", "prefix"): lambda: {"afk_" + "x" * 4},  # the secret's first 8 characters (app/external.py)
+    ("api_keys", "token_hash"): lambda: {"f" * 64},  # a SHA-256 hex digest
     ("credentials", "provider"): lambda: set(credentials.PROVIDERS),  # app/credentials.py::add refuses any other
     ("credentials", "test_result"): lambda: set(credentials.TEST_RESULTS),
     ("credentials", "last4"): lambda: {"f" * 4},  # the key's last four characters
@@ -373,6 +417,7 @@ def test_every_integer_column_is_accounted_for():
         ("runs", "agent_version"), ("runs", "steps_used"), ("runs", "tool_calls"), ("runs", "failures"),  # <= limits
         ("run_steps", "n"), ("tool_executions", "step_n"),
         ("agent_versions", "version"), ("agent_versions", "blueprint_version"), ("evaluations", "round"),
+        ("api_keys", "agent_version"), ("api_keys", "max_runs_per_day"),  # an active version; at most MAX_RUNS_PER_DAY
         ("workflows", "revision"), ("workflow_versions", "version"),  # counted by the code, one per saved change
     }
     integers = {

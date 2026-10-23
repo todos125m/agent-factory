@@ -15,7 +15,7 @@ from app import errors, sources, worker
 from app.db import SessionLocal, engine, ensure_column_lengths, ensure_indexes, migrate
 from app.registry import sync_from_files
 from app.routers import (
-    agents, auth, benchmarks, blueprints, credentials, factory, feedback, inbox, interview, manager, projects, settings, tasks,
+    agents, api_keys, auth, benchmarks, blueprints, credentials, external, factory, feedback, inbox, interview, manager, projects, settings, tasks,
     users, workflows,
 )
 from app.state_machine import ProjectPaused, TransitionError
@@ -99,6 +99,8 @@ app.include_router(factory.router)
 app.include_router(benchmarks.router)
 app.include_router(workflows.router)
 app.include_router(credentials.router)
+app.include_router(api_keys.router)
+app.include_router(external.router)
 
 
 @app.get("/health")
