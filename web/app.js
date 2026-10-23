@@ -443,7 +443,10 @@ var root;
 function setNav(page){
   if (page === 'workflow') page = 'workflows';
   document.querySelectorAll('.nav-item').forEach(function(b){
-    b.classList.toggle('active', b.dataset.page === page);
+    var on = b.dataset.page === page;
+    b.classList.toggle('active', on);
+    // The phone nav scrolls sideways: keep the current page's button in view.
+    if (on && b.scrollIntoView) { try { b.scrollIntoView({block:'nearest', inline:'nearest'}); } catch (e) {} }
   });
 }
 
