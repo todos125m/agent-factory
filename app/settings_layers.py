@@ -37,10 +37,10 @@ DEFAULTS: dict[str, Any] = {
     "model_access": "claude_account",
     # Agents name a role, never a model ID (§29). Each role maps to a provider + model here.
     "models": {
-        "manager": {"provider": "anthropic", "model": "claude-opus-5", "effort": "medium"},
-        "research": {"provider": "anthropic", "model": "claude-sonnet-5", "effort": "low"},
-        "coding": {"provider": "anthropic", "model": "claude-opus-5", "effort": "high"},
-        "cheap": {"provider": "anthropic", "model": "claude-haiku-4-5", "effort": None},
+        "manager": {"provider": "anthropic", "model": "claude-opus-5", "effort": "medium", "credential_ref": None},
+        "research": {"provider": "anthropic", "model": "claude-sonnet-5", "effort": "low", "credential_ref": None},
+        "coding": {"provider": "anthropic", "model": "claude-opus-5", "effort": "high", "credential_ref": None},
+        "cheap": {"provider": "anthropic", "model": "claude-haiku-4-5", "effort": None, "credential_ref": None},
     },
 }
 

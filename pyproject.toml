@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.30",
     "pyyaml>=6.0",
     "alembic>=1.13",
+    "cryptography>=42",  # the owner's provider keys are kept encrypted (app/credentials.py)
 ]
 
 [project.optional-dependencies]

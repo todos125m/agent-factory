@@ -248,11 +248,13 @@ class ContextLayer(_LayerPart):
 
 
 class ModelRouteLayer(_LayerPart):
-    _nullable: ClassVar[frozenset[str]] = frozenset({"effort"})
+    _nullable: ClassVar[frozenset[str]] = frozenset({"effort", "credential_ref"})
 
     provider: ProviderName | None = None
     model: ModelId | None = None
     effort: Effort | None = None
+    # The owner's own key for this route, by reference only (app/credentials.py): `cred:<id>`.
+    credential_ref: Annotated[str, Field(strict=True, pattern=r"^cred:[0-9]{1,9}$")] | None = None
 
 
 class SettingsLayerIn(_LayerPart):

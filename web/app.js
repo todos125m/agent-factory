@@ -2279,10 +2279,76 @@ function setPath(obj, path, value){
   cur[parts[parts.length - 1]] = value;
 }
 
+// The account's connections (app/credentials.py): only masked state ever reaches the page.
+var CREDS = [];
+function credName(ref){
+  var c = CREDS.filter(function(x){ return x.ref === ref; })[0];
+  return c ? c.name + ' (' + c.masked + ')' : ref;
+}
+
+function connectionsCard(onChange){
+  var card = el('div', {class:'card stack'}, el('h3', {text:t('conn.title')}), el('p', {class:'muted', text:t('conn.help')}));
+  var list = el('div', {class:'stack'});
+  var form = el('div', {class:'stack'});
+  card.appendChild(list); card.appendChild(form);
+  var status = el('p', {class:'err muted', role:'status'});
+
+  function load(){
+    api('/credentials').then(function(r){ CREDS = r.items; draw(r); onChange(); })
+      .catch(function(e){ clear(list); list.appendChild(errorBox(e.message, load)); });
+  }
+  function draw(r){
+    clear(list); clear(form);
+    if (!r.items.length) list.appendChild(el('p', {class:'muted', text:t('conn.empty')}));
+    r.items.forEach(function(c){
+      var result = c.test_result ? el('span', {class:'chip ' + (c.test_result === 'ok' ? 'status-COMPLETED' : 'status-FAILED'), text:lbl('ctest', c.test_result)})
+        : el('span', {class:'chip', text:t('conn.untested')});
+      var test = el('button', {class:'btn ghost sm', type:'button', text:t('conn.test'), title:t('conn.test_help')});
+      test.addEventListener('click', function(){
+        test.disabled = true; test.textContent = t('conn.testing');
+        api('/credentials/' + c.id + '/test', {method:'POST'}).then(load).catch(function(e){ status.textContent = e.message; test.disabled = false; test.textContent = t('conn.test'); });
+      });
+      var revoke = el('button', {class:'btn ghost sm', type:'button', text:t('conn.revoke')});
+      revoke.addEventListener('click', function(){
+        if (!window.confirm(t('conn.revoke_confirm', {name: c.name}))) return;
+        revoke.disabled = true;
+        api('/credentials/' + c.id, {method:'DELETE'}).then(load).catch(function(e){ status.textContent = e.message; revoke.disabled = false; });
+      });
+      list.appendChild(el('div', {class:'row', style:'justify-content:space-between;flex-wrap:wrap;gap:8px'},
+        el('span', {}, el('b', {text:c.name}), ' · ' + lbl('cprovider', c.provider) + ' · ', el('code', {dir:'ltr', text:c.masked}), ' ', result,
+          c.tested_at ? el('small', {class:'muted', text:' ' + t('conn.tested_at', {time: fmtTime(c.tested_at)})}) : null),
+        el('span', {class:'row'}, test, revoke)));
+    });
+    if (!r.available){
+      form.appendChild(el('p', {class:'notice', role:'status', text:t('err.' + r.reason)}));
+      return;
+    }
+    var name = el('input', {type:'text', maxlength:'100', 'aria-label':t('conn.name'), placeholder:t('conn.name')});
+    var provider = el('select', {'aria-label':t('conn.provider')});
+    r.providers.forEach(function(p){ provider.appendChild(el('option', {value:p}, lbl('cprovider', p))); });
+    // type=password, no autofill, no spellcheck: the key is typed or pasted once and the field is emptied at once
+    var key = el('input', {type:'password', autocomplete:'off', spellcheck:'false', dir:'ltr', 'aria-label':t('conn.key'), placeholder:t('conn.key')});
+    var add = el('button', {class:'btn', type:'button', text:t('conn.add')});
+    add.addEventListener('click', function(){
+      if (!name.value.trim() || !key.value) return;
+      var body = {name: name.value.trim(), provider: provider.value, key: key.value, request_id: newRequestId()};
+      key.value = '';
+      add.disabled = true; status.textContent = '';
+      api('/credentials', {method:'POST', json: body}).then(load).catch(function(e){ status.textContent = e.message; add.disabled = false; });
+    });
+    form.appendChild(el('div', {class:'row', style:'flex-wrap:wrap;gap:8px'}, name, provider, key, add));
+  }
+  card.appendChild(status);
+  load();
+  return card;
+}
+
 function renderSettings(root){
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('nav.settings')})));
   root.appendChild(accountCard());
   root.appendChild(preferencesCard());
+  var formDrawn = false;  // the model form lists the connections, so it is drawn again when they change
+  root.appendChild(connectionsCard(function(){ if (formDrawn) loadLayer(); }));
   var scopePicker = el('div', {class:'tabs', role:'tablist'});
   var scopeExtra = el('div', {class:'card', id:'scope-extra'});
   var body = el('div', {class:'stack'});
@@ -2377,7 +2443,7 @@ function renderSettings(root){
     Promise.all([
       api('/settings/' + scope + '/' + scopeId),
       api('/settings/resolved' + (resolvedQuery() ? '?' + resolvedQuery() : ''))
-    ]).then(function(r){ drawForm(r[0], r[1]); })
+    ]).then(function(r){ drawForm(r[0], r[1]); formDrawn = true; })
       .catch(function(e){ clear(body); body.appendChild(errorBox(e.message, loadLayer)); });
   }
 
@@ -2395,6 +2461,19 @@ function renderSettings(root){
         else setPath(overrides, path, Number(input.value));
       });
       return el('label', {class:'f'}, label, input);
+    }
+    // Which of the account's connections a model role uses (a reference; the key never reaches this page).
+    function credentialField(role){
+      var path = 'models.' + role + '.credential_ref';
+      var cur = getPath(overrides, path);
+      var sel = el('select', {'aria-label':t('conn.route')});
+      sel.appendChild(el('option', {value:''}, t('conn.route_none')));
+      CREDS.forEach(function(c){ sel.appendChild(el('option', {value:c.ref}, c.name + ' (' + c.masked + ') · ' + lbl('cprovider', c.provider))); });
+      sel.value = cur !== undefined && cur !== null ? cur : '';
+      sel.addEventListener('change', function(){
+        if (sel.value === '') unsetPath(overrides, path); else setPath(overrides, path, sel.value);
+      });
+      return el('label', {class:'f'}, t('conn.route'), sel);
     }
     function optLabel(group, v){ return group ? lbl(group, v) : (v === null || v === undefined || v === '' ? '—' : String(v)); }
     function selectField(path, label, options, group){
@@ -2440,7 +2519,8 @@ function renderSettings(root){
         el('div', {class:'grid grid-3'},
           selectField('models.' + role + '.provider', t('common.provider'), PROVIDERS, null),
           textField('models.' + role + '.model', t('common.model')),
-          selectField('models.' + role + '.effort', t('settings.effort'), ['low','medium','high'], 'effort'))));
+          selectField('models.' + role + '.effort', t('settings.effort'), ['low','medium','high'], 'effort')),
+        credentialField(role)));
     });
     if (resolved.model_access !== undefined){
       models.appendChild(el('div', {class:'card', style:'background:var(--surface-2)'},

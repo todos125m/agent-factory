@@ -9,7 +9,7 @@ from app import auth, settings_layers
 from app.auth import current_user
 from app.db import get_session
 from app.errors import AppError, not_found
-from app.models import SettingsLayer, SettingsScope, Task, User, Workspace
+from app.models import Credential, SettingsLayer, SettingsScope, Task, User, Workspace
 from app.schemas import SettingsLayerIn, SettingsLayerOut, WorkspaceCreate, WorkspaceOut
 
 router = APIRouter(tags=["settings"])
@@ -99,6 +99,23 @@ def _describe_invalid(error: ValidationError) -> str:
     return "Invalid settings: " + "; ".join(problems)
 
 
+def _check_credential_refs(session: Session, values: dict[str, Any], me: User) -> None:
+    """A model route may name only a live connection of the account saving it, made for that route's provider."""
+    from app import credentials
+
+    for role, route in (values.get("models") or {}).items():
+        ref = route.get("credential_ref") if isinstance(route, dict) else None
+        if not ref:
+            continue
+        match = credentials.REF_PATTERN.fullmatch(ref)
+        credential = session.get(Credential, int(match.group(1))) if match else None
+        if credential is None or credential.owner_id != me.id or credential.revoked_at is not None:
+            raise AppError(422, "settings_invalid", f"models.{role}.credential_ref: not one of your connections")
+        if route.get("provider") and credential.provider != route["provider"]:
+            raise AppError(422, "settings_invalid",
+                           f"models.{role}.credential_ref: that connection is for {credential.provider}")
+
+
 @router.put("/settings/{scope}/{scope_id}", response_model=SettingsLayerOut)
 def put_settings_layer(
     scope: SettingsScope,
@@ -113,6 +130,7 @@ def put_settings_layer(
         SettingsLayerIn.model_validate(values)
     except ValidationError as e:
         raise AppError(422, "settings_invalid", _describe_invalid(e)) from e
+    _check_credential_refs(session, values, me)
     layer = settings_layers.get_layer(session, scope, scope_id) or SettingsLayer(scope=scope, scope_id=scope_id)
     layer.values = values
     session.add(layer)

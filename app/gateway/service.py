@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import settings_layers, storable
+from app import credentials, settings_layers, storable
 from app.events import record_event, record_factory_event
 from app.gateway.pricing import cost_usd
 from app.gateway.providers import (
@@ -25,7 +25,7 @@ from app.gateway.providers import (
     WebSearchConfig,
     default_providers,
 )
-from app.models import BudgetHold, FactorySession, ModelCall, Task, utcnow
+from app.models import BudgetHold, FactorySession, ModelCall, Project, Task, utcnow
 from app.pause import refuse_if_paused
 
 # Hard ceiling regardless of settings (owner's directive): a misconfigured or malicious settings
@@ -118,6 +118,7 @@ class Gateway:
             raise ProviderError(f"unknown provider '{route['provider']}'")
         if len(str(route["model"])) > MAX_MODEL_ID_CHARS:
             raise ProviderError(f"the model id of role '{role}' is longer than {MAX_MODEL_ID_CHARS} characters; fix it in the settings")
+        api_key = self._route_key(route, project_id, factory_session_id)
         budget = settings["budget"]
         max_out = int(budget["max_output_tokens"])
 
@@ -142,6 +143,7 @@ class Gateway:
             json_schema=json_schema,
             effort=route.get("effort"),
             web_search=web_search,
+            api_key=api_key,
         )
         hold_id = None
         if not getattr(provider, "free", False):
@@ -162,9 +164,12 @@ class Gateway:
         try:
             response = provider.complete(request)
         except Exception as e:
-            call.ok, call.error = False, storable.clean(str(e))[:500]  # a provider may quote a model's text
+            message = credentials.redact(str(e), api_key)  # a provider may quote the key it was given
+            call.ok, call.error = False, storable.clean(message)[:500]  # a provider may quote a model's text
             call.duration_ms = int((time.monotonic() - started) * 1000)
             self._log(call, hold_id)
+            if api_key and api_key in str(e):
+                raise ProviderError(message) from None
             raise
         u = response.usage
         call.input_tokens, call.output_tokens = u.input_tokens, u.output_tokens
@@ -181,6 +186,26 @@ class Gateway:
         response.cost_usd = call.cost_usd
         response.duration_ms = call.duration_ms
         return response
+
+    def _route_key(self, route: dict[str, Any], project_id: int | None, factory_session_id: int | None) -> str | None:
+        """The owner's own key when the route names one (`credential_ref`), for the owner of this call's project or
+        build and the route's own provider; a reference that is another account's is ignored (the server's own key is used, as before)."""
+        ref = route.get("credential_ref")
+        if not ref:
+            return None
+        owner_id = None
+        if project_id is not None:
+            project = self.session.get(Project, project_id)
+            owner_id = project.owner_id if project is not None else None
+        elif factory_session_id is not None:
+            build = self.session.get(FactorySession, factory_session_id)
+            owner_id = build.owner_id if build is not None else None
+        try:
+            return credentials.key_for_call(self.session, owner_id, ref, route["provider"])
+        except credentials.CredentialNotYours:
+            return None  # a shared layer (the admin's global one) names the admin's key: for anyone else, the server's own
+        except credentials.CredentialUnavailable as e:
+            raise ProviderError(str(e)) from None
 
     def _log(self, call: ModelCall, hold_id: int | None) -> None:
         """Log the call; its ModelCall row replaces its budget hold in one commit.

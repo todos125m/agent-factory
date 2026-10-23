@@ -15,7 +15,7 @@ from app import errors, sources, worker
 from app.db import SessionLocal, engine, ensure_column_lengths, ensure_indexes, migrate
 from app.registry import sync_from_files
 from app.routers import (
-    agents, auth, benchmarks, blueprints, factory, feedback, inbox, interview, manager, projects, settings, tasks,
+    agents, auth, benchmarks, blueprints, credentials, factory, feedback, inbox, interview, manager, projects, settings, tasks,
     users, workflows,
 )
 from app.state_machine import ProjectPaused, TransitionError
@@ -55,10 +55,15 @@ class _AsciiJSONResponse(JSONResponse):
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+async def request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     """FastAPI's default 422, except that a NaN/Infinity input (Python's JSON parser accepts both) is echoed as text
     and a lone surrogate is escaped: the default handler can't serialize either and answered 500 instead."""
-    detail = jsonable_encoder(exc.errors(), custom_encoder=_NON_FINITE_AS_TEXT)
+    # A secret is never echoed back: the "input" of an error on a key field is dropped (app/credentials.py).
+    # A "missing" or a body-level error carries the WHOLE body as its input: on /credentials nothing is echoed at all.
+    secret = request.url.path.startswith("/credentials")
+    errs = [{k: v for k, v in e.items() if k not in ("input", "ctx")} if secret or e.get("loc", ())[-1:] == ("key",) else e
+            for e in exc.errors()]
+    detail = jsonable_encoder(errs, custom_encoder=_NON_FINITE_AS_TEXT)
     return _AsciiJSONResponse(status_code=422, content=errors.body(422, detail, "invalid_request"))
 
 
@@ -93,6 +98,7 @@ app.include_router(interview.router)
 app.include_router(factory.router)
 app.include_router(benchmarks.router)
 app.include_router(workflows.router)
+app.include_router(credentials.router)
 
 
 @app.get("/health")
