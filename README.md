@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR6–PR7 pending | 🟡 PR5 |
+| Human-guided factory (Issue #2) | PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). PR6b–PR7 pending | 🟡 PR6 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -247,6 +247,26 @@ from the currently approved brief and moves the build to BUILDING (PR5). The UI'
 | POST | `/factory/sessions/{id}/design/revert` | `{to_version, …}` (undo) |
 | POST | `/factory/sessions/{id}/design/assist` | one paid suggestion within the build's budget |
 | POST | `/factory/sessions/{id}/design/approve` | `{blueprint_version, …}` |
+
+### Workflows (issue #2 PR6)
+
+Agents are connected on a canvas (`#workflows`): `data` edges carry one agent's result field into the next one's input
+through an explicit mapping (a list becomes text only with an explicit `join`), `model` edges give an agent its model
+role, `tool` edges only a tool the agent has, has the permission for and the Tool Gateway implements, `knowledge` edges
+only a source the agent may use. The validator refuses cycles, wrong ports, type mismatches and missing required inputs
+before an approval. Every semantic change is a new immutable version; moving a node changes nothing but its place;
+**saving never runs anything**. Nodes pin an exact agent version (a built agent's version that passed, or an active
+registry agent). *Run* turns the owner-approved version into the project's tasks through the manager's plan (dependencies
+from the data edges, a missing agent is a BLOCKED task), which still waits for the owner's plan approval.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST | `/workflows` | list mine / create |
+| GET | `/workflows/{id}` | the latest version, issues, layout, catalog of what can be pinned |
+| PUT | `/workflows/{id}/draft` | `{nodes, edges, expected_revision, request_id}` — save a version (nothing runs) |
+| PUT | `/workflows/{id}/layout` | node positions (display only) |
+| POST | `/workflows/{id}/approve` | `{version, …}` — the owner approves exactly that version |
+| POST | `/workflows/{id}/run` | `{version, project_id, request_id}` — create the project's tasks |
 
 ### Building, evaluating, activating (issue #2 PR5)
 

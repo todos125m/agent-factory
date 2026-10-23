@@ -17,7 +17,7 @@
 | G8 ✅ PR4 | WAITING با reason؛ BLOCKED / WAITING_SPECIALIST | `TaskStatus` وضعیت BLOCKED ندارد؛ reason فقط در payload رویداد است، نه روی Task (`app/models.py::TaskStatus`) | نیاز به ستون/وضعیت جدید → نیاز به مهاجرت | ۴ |
 | G9 ✅ PR4 | runtime محدود: step loop، RunSnapshot، lease/heartbeat، تکرار نکردن اثر | هر اجرای task یک فراخوانی همزمان داخل درخواست HTTP است (`run_task`)؛ worker، lease، snapshot و ToolExecution ندارد؛ ابزار فقط `web_search` سمت سرور ارائه‌دهنده | بدون سقف step و بدون بازیابی crash | ۴ |
 | G10 ✅ PR5 | Builder و Reviewer/Evaluator، موارد عادی/مرزی/شکست | ساخته نشده (فاز ۶ README خالی)؛ `BenchmarkRun` فقط مسیر مدل‌ها را مقایسه می‌کند | «JSON معتبر با نتیجه‌ی ناموفق» امروز تشخیص داده نمی‌شود | ۵ |
-| G11 | بوم workflow، typed edges، credential_ref | ندارد؛ کلیدها فقط متغیر محیطی سراسری‌اند | | ۶ |
+| G11 ✅ PR6 (workflow) | بوم workflow، typed edges، credential_ref | ندارد؛ کلیدها فقط متغیر محیطی سراسری‌اند | credential_ref: PR6ب | ۶ |
 | G12 | API بیرونی با scope، quota، نسخه‌ی pinned | ندارد | | ۷ |
 | G13 ✅ PR2a | مهاجرت قابل تکرار SQLite/PostgreSQL | `create_all` + `ensure_indexes` + `ensure_column_lengths` (`app/db.py`): جدول و ایندکس جدید و عریض‌کردن؛ **افزودن ستون به جدول موجود ممکن نیست** | G8/G6 بدون مهاجرت قابل انجام نیستند | تصمیم قبل از ۲ |
 | G14 | چهار محور تنظیمات؛ fa/en/tr؛ خطا با code | **بسته شد در PR1** (این برنچ) | — | ۱ ✅ |

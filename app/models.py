@@ -605,3 +605,39 @@ class Evaluation(Base):
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Workflow(Base):
+    """Agents connected on a canvas (app/workflow.py). Its meaning lives in immutable WorkflowVersions; `layout` is only
+    where the nodes sit, so moving one is not a change. `revision` counts the semantic changes (optimistic concurrency)."""
+
+    __tablename__ = "workflows"
+    __table_args__ = (UniqueConstraint("owner_id", "request_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    request_id: Mapped[str | None] = mapped_column(String(64))  # the create request that made it (replay finds it)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    layout: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkflowVersion(Base):
+    """One immutable version of a workflow: nodes (each pinned to an exact agent version), typed edges with their
+    mappings, and the validator's issues at the time it was saved. Approved by the owner as exactly this version."""
+
+    __tablename__ = "workflow_versions"
+    __table_args__ = (UniqueConstraint("workflow_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflows.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    nodes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    edges: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    issues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
