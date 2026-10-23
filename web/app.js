@@ -253,12 +253,13 @@ function renderLanguageChooser(root, onDone, toAccount){
 function ensureUser(){
   return api('/auth/state').then(function(st){
     if (st.signed_in) return api('/auth/me');
-    var oldId = localStorage.getItem('af_user_id');  // an account from before login existed: claim it once
-    if (oldId) return api('/auth/claim', {method:'POST', json:{user_id: Number(oldId)}}).catch(function(){ return null; });
-    if (!st.accounts_exist){  // the server's first visitor: its admin
+    if (!st.accounts_exist){  // the server's first visitor: its admin (also when this browser remembers an account of a wiped server)
+      try { localStorage.removeItem('af_user_id'); } catch(e){}
       var email = 'owner-' + Math.random().toString(36).slice(2, 10) + '@agent-factory.local';
       return api('/users', {method:'POST', json:{email: email, name:t('common.owner_name')}});
     }
+    var oldId = localStorage.getItem('af_user_id');  // an account from before login existed: claim it once
+    if (oldId) return api('/auth/claim', {method:'POST', json:{user_id: Number(oldId)}}).catch(function(){ return null; });
     return null;
   }).then(function(me){
     if (!me) return null;
