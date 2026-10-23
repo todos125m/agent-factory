@@ -17,8 +17,10 @@ KEY = "sk-test-0123456789abcdefghijKLMNOP"
 
 
 def add(client, name="Main", provider="anthropic", key=KEY, **kw):
-    return client.post("/credentials", json={"name": name, "provider": provider, "key": key,
-                                              "request_id": kw.pop("request_id", None) or rid()})
+    body = {"name": name, "provider": provider, "key": key, "request_id": kw.pop("request_id", None) or rid()}
+    if "base_url" in kw:
+        body["base_url"] = kw.pop("base_url")
+    return client.post("/credentials", json=body)
 
 
 def made(client, **kw):
@@ -378,3 +380,106 @@ def test_a_key_neither_secret_opens_is_counted_and_left_alone(client, session_fa
         before = s.get(Credential, c["id"]).ciphertext
         assert credentials.rotate(s) == {"rotated": 0, "unreadable": 1}
         assert s.get(Credential, c["id"]).ciphertext == before
+
+
+# ---------- any OpenAI-compatible provider: a connection with an address ----------
+
+GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def test_a_connection_to_another_provider_keeps_its_address_and_tests_against_it(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(credentials, "_http_status", lambda url, headers: seen.append((url, headers)) or 200)
+    c = made(client, provider="openai", name="Gemini", base_url=GEMINI)
+    assert c["base_url"] == GEMINI.rstrip("/")
+    client.post(f"/credentials/{c['id']}/test")
+    assert seen == [(GEMINI.rstrip("/") + "/models", {"Authorization": f"Bearer {KEY}"})]
+    assert made(client, name="plain", provider="openai")["base_url"] is None  # OpenAI's own
+
+
+@pytest.mark.parametrize("url", ["ftp://example.com/v1", "http://example.com/v1", "https://user:pw@example.com/v1",
+                                 "https://example.com/v1?x=1", "https://example.com/v1#a", "https:///v1", "example.com/v1",
+                                 "https://exa mple.com", "https://example.com/" + "a" * 300])
+def test_an_unusable_address_is_refused(client, url):
+    r = add(client, provider="openai", base_url=url)
+    assert r.status_code == 422 and r.json()["code"] == "credential_invalid", r.text
+
+
+def test_plain_http_is_only_for_this_machines_own_servers(client):
+    assert add(client, provider="openai", name="lm", base_url="http://localhost:1234/v1").status_code == 201
+    assert add(client, provider="openai", name="dk", base_url="http://host.docker.internal:8080/v1").status_code == 201
+
+
+def test_an_address_belongs_to_the_openai_kind_only(client):
+    r = add(client, provider="anthropic", base_url=GEMINI)
+    assert r.status_code == 422 and r.json()["code"] == "credential_invalid" and "address" in r.json()["detail"]
+
+
+def test_only_the_admin_may_point_the_server_at_another_address(client):
+    client.post("/users", json={"email": "first@example.com"})  # the first account is the admin
+    member = client.post("/users", json={"email": "member@example.com"}).json()
+    client.sign_in_as(member["id"])
+    r = add(client, provider="openai", base_url=GEMINI)
+    assert r.status_code == 403 and r.json()["params"] == {"reason": "admin_only"}, r.text
+    assert add(client, provider="openai", name="own").status_code == 201  # their own OpenAI key is fine
+
+
+def test_the_gateway_hands_the_provider_the_address_of_the_connection(client, session_factory, project):
+    pid = project["id"]
+    c = made(client, provider="openai", name="Gemini", base_url=GEMINI)
+
+    class Seen(FakeProvider):
+        def complete(self, request):
+            self.got = (request.api_key, request.base_url)
+            return super().complete(request)
+
+    client.put(f"/settings/project/{pid}", json={"models": {"research": {"provider": "openai", "model": "gemini-x", "credential_ref": c["ref"]}}})
+    fake = Seen(replies=[{"ok": True}])
+    with session_factory() as s:
+        Gateway(s, providers={"openai": fake}).call("research", system="s", user="u", project_id=pid)
+    assert fake.got == (KEY, GEMINI.rstrip("/"))
+
+
+def test_the_openai_provider_speaks_plainly_to_another_provider(monkeypatch):
+    """Another provider gets max_tokens, no reasoning_effort, no response_format; the schema rides in the prompt and a
+    fenced JSON reply is still read."""
+    from types import SimpleNamespace
+
+    from app.gateway.openai_provider import OpenAIProvider
+    from app.gateway.providers import ModelRequest
+
+    sent = {}
+
+    class Completions:
+        def create(self, **kw):
+            sent.update(kw)
+            fenced = "```json\n{\"a\": 1}\n```"
+            msg = SimpleNamespace(content=fenced if "max_tokens" in kw else '{"a": 1}', refusal=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason="stop")], model="m",
+                                   usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2, prompt_tokens_details=None))
+
+    provider = OpenAIProvider()
+    monkeypatch.setattr(provider, "_get_client", lambda key, url: SimpleNamespace(chat=SimpleNamespace(completions=Completions())))
+    req = ModelRequest(model="m", system="sys", user="u", max_output_tokens=50, json_schema={"type": "object"}, effort="high",
+                       api_key="k" * 24, base_url=GEMINI)
+    response = provider.complete(req)
+    assert response.data == {"a": 1}
+    assert sent["max_tokens"] == 50 and "max_completion_tokens" not in sent
+    assert "reasoning_effort" not in sent and "response_format" not in sent and "JSON schema" in sent["messages"][0]["content"]
+    sent.clear()
+    provider.complete(ModelRequest(model="m", system="sys", user="u", max_output_tokens=50, json_schema={"type": "object"},
+                                   effort="high", api_key="k" * 24))  # OpenAI itself keeps its own parameters
+    assert sent["max_completion_tokens"] == 50 and sent["reasoning_effort"] == "high" and "response_format" in sent
+
+
+def test_a_call_with_no_project_uses_the_connections_of_the_owner_it_names(client, session_factory):
+    """The Setup test has neither a project nor a build: it names the admin, whose connection the global layer carries."""
+    c = made(client)
+    client.put("/settings/global/0", json={"models": {"cheap": {"provider": "anthropic", "model": "claude-haiku-4-5",
+                                                               "credential_ref": c["ref"]}}})
+    with session_factory() as s:
+        owner_id = s.get(Credential, c["id"]).owner_id
+        fake = Recording(replies=[{"ok": True}, {"ok": True}])
+        gateway(s, fake).call("cheap", system="s", user="u", owner_id=owner_id)
+        gateway(s, fake).call("cheap", system="s", user="u")  # no owner: the server's own key (none here)
+    assert fake.keys == [KEY, None]

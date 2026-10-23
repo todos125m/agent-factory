@@ -21,6 +21,8 @@ class CredentialCreate(StorableIn):
     # Not bounded here: a too-long key must not be echoed back in a validation error (app/credentials.py::add checks it).
     key: str = Field(max_length=2000, repr=False)
     request_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    # Not bounded here either: app/credentials.py::clean_base_url checks it (an address may hold what it should not echo).
+    base_url: str | None = Field(default=None, max_length=2000)
 
 
 @router.get("")
@@ -31,7 +33,7 @@ def list_credentials(db: Session = Depends(get_session), me: User = Depends(curr
 @router.post("", status_code=201)
 def add_credential(body: CredentialCreate, db: Session = Depends(get_session), me: User = Depends(current_user)):
     credential, applied = credentials.add(db, me, name=body.name.strip(), provider=body.provider, key=body.key,
-                                          request_id=body.request_id)
+                                          request_id=body.request_id, base_url=body.base_url)
     return {**credentials.view(credential), "duplicate": not applied}
 
 

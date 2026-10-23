@@ -100,8 +100,10 @@ class Gateway:
         json_schema: dict[str, Any] | None = None,
         route: dict[str, Any] | None = None,
         factory_session_id: int | None = None,
+        owner_id: int | None = None,
     ) -> ModelResponse:
-        """`factory_session_id`: a call made for building an agent (no project): held against that build's budget."""
+        """`factory_session_id`: a call made for building an agent (no project): held against that build's budget.
+        `owner_id`: whose connections a route may name when the call has neither a project nor a build (the Setup test)."""
         if project_id is None and task_id is not None:
             # A task's call belongs to its project: pause check, settings, budget and ModelCall alike.
             task = self.session.get(Task, task_id)
@@ -118,7 +120,7 @@ class Gateway:
             raise ProviderError(f"unknown provider '{route['provider']}'")
         if len(str(route["model"])) > MAX_MODEL_ID_CHARS:
             raise ProviderError(f"the model id of role '{role}' is longer than {MAX_MODEL_ID_CHARS} characters; fix it in the settings")
-        api_key = self._route_key(route, project_id, factory_session_id)
+        api_key, base_url = self._route_key(route, project_id, factory_session_id, owner_id)
         budget = settings["budget"]
         max_out = int(budget["max_output_tokens"])
 
@@ -144,6 +146,7 @@ class Gateway:
             effort=route.get("effort"),
             web_search=web_search,
             api_key=api_key,
+            base_url=base_url,
         )
         hold_id = None
         if not getattr(provider, "free", False):
@@ -187,13 +190,13 @@ class Gateway:
         response.duration_ms = call.duration_ms
         return response
 
-    def _route_key(self, route: dict[str, Any], project_id: int | None, factory_session_id: int | None) -> str | None:
+    def _route_key(self, route: dict[str, Any], project_id: int | None, factory_session_id: int | None,
+                   owner_id: int | None = None) -> tuple[str | None, str | None]:
         """The owner's own key when the route names one (`credential_ref`), for the owner of this call's project or
         build and the route's own provider; a reference that is another account's is ignored (the server's own key is used, as before)."""
         ref = route.get("credential_ref")
         if not ref:
-            return None
-        owner_id = None
+            return None, None
         if project_id is not None:
             project = self.session.get(Project, project_id)
             owner_id = project.owner_id if project is not None else None
@@ -201,9 +204,9 @@ class Gateway:
             build = self.session.get(FactorySession, factory_session_id)
             owner_id = build.owner_id if build is not None else None
         try:
-            return credentials.key_for_call(self.session, owner_id, ref, route["provider"])
+            return credentials.credential_for_call(self.session, owner_id, ref, route["provider"])
         except credentials.CredentialNotYours:
-            return None  # a shared layer (the admin's global one) names the admin's key: for anyone else, the server's own
+            return None, None  # a shared layer (the admin's global one) names the admin's key: for anyone else, the server's own
         except credentials.CredentialUnavailable as e:
             raise ProviderError(str(e)) from None
 

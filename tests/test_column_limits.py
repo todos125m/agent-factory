@@ -211,6 +211,7 @@ CLOSED = {
     ("credentials", "provider"): lambda: set(credentials.PROVIDERS),  # app/credentials.py::add refuses any other
     ("credentials", "test_result"): lambda: set(credentials.TEST_RESULTS),
     ("credentials", "last4"): lambda: {"f" * 4},  # the key's last four characters
+    ("credentials", "base_url"): lambda: {"https://" + "a" * (credentials.BASE_URL_MAX - 8)},  # clean_base_url allows no more
     ("agent_versions", "state"): lambda: build.VERSION_STATES,
     ("evaluations", "verdict"): lambda: build.VERDICTS,
     ("tasks", "reason"): lambda: runtime.STOP_REASONS | set(runtime.WAITING_REASONS.values()),
