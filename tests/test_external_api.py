@@ -380,3 +380,31 @@ def test_the_list_counts_each_keys_runs_in_one_query(client, session_factory, ex
     call(ext, secret, "POST", "/runs", input="y", request_id="count-call-02")
     used = {k["name"]: k["runs_today"] for k in client.get("/api-keys").json()["items"]}
     assert used == {"CI": 2, "other": 0} and other["id"] != key["id"]
+
+
+# ---------- failed attempts are throttled ----------
+
+
+def test_a_client_that_keeps_failing_is_stopped_before_any_lookup_and_a_good_key_is_never_counted(ext, setup, monkeypatch):
+    _, _, secret = setup
+    monkeypatch.setattr(external, "FAILED_KEYS", external.FailureLimiter(limit=3))
+    for _ in range(3):
+        assert ext.get("/api/v1/me", headers=bearer("afk_" + "z" * 43)).status_code == 401
+    blocked = ext.get("/api/v1/me", headers=bearer("afk_" + "z" * 43))
+    assert blocked.status_code == 429 and blocked.json()["code"] == "too_many_attempts"
+    assert ext.get("/api/v1/me", headers=bearer(secret)).status_code == 429  # blocked is blocked, even for a good key
+    monkeypatch.setattr(external, "FAILED_KEYS", external.FailureLimiter(limit=3))  # a fresh window
+    for _ in range(10):  # good calls never count
+        assert ext.get("/api/v1/me", headers=bearer(secret)).status_code == 200
+
+
+def test_the_limiter_forgets_after_its_window_and_stays_bounded():
+    from datetime import timedelta
+
+    limiter = external.FailureLimiter(limit=2, window=timedelta(seconds=10), max_clients=20)
+    limiter.fail("a", 0.0)
+    limiter.fail("a", 1.0)
+    assert limiter.blocked("a", 2.0) and not limiter.blocked("a", 12.0)
+    for i in range(500):
+        limiter.fail(f"client-{i}", float(i))
+    assert len(limiter.failures) <= 20

@@ -33,6 +33,7 @@ TEST_RESULTS = ("ok", "rejected", "unreachable")
 REF_PATTERN = re.compile(r"^cred:([0-9]{1,9})$")
 KEY_MIN, KEY_MAX = 20, 300
 SECRET_ENV = "AGENT_FACTORY_SECRET_KEY"
+PREVIOUS_ENV = "AGENT_FACTORY_SECRET_KEY_PREVIOUS"  # while rotating: keys kept under the old secret still decrypt
 SECRET_MIN = 32
 SECRET_DISTINCT = 12  # a secret of one repeated character is as good as none
 KDF_SALT = b"agent-factory/credentials/v1"
@@ -76,9 +77,13 @@ def _fernet():
         raise AppError(503, "secret_key_missing",
                        f"Keys can't be kept: set {SECRET_ENV} (at least {SECRET_MIN} characters, {SECRET_DISTINCT} different) "
                        "in the server's environment")
-    from cryptography.fernet import Fernet
+    from cryptography.fernet import Fernet, MultiFernet
 
-    return Fernet(_derive(os.environ[SECRET_ENV]))
+    ferns = [Fernet(_derive(os.environ[SECRET_ENV]))]  # the first encrypts; every one may decrypt
+    previous = os.getenv(PREVIOUS_ENV, "")
+    if previous and previous != os.environ[SECRET_ENV]:
+        ferns.append(Fernet(_derive(previous)))
+    return MultiFernet(ferns)
 
 
 def mask(credential: Credential) -> str:
@@ -220,3 +225,35 @@ def key_for_call(db: Session, owner_id: int | None, ref: str, provider: str) -> 
 
 def redact(text: str, key: str | None) -> str:
     return text.replace(key, "[redacted]") if key else text
+
+
+def rotate(db: Session) -> dict[str, int]:
+    """Re-encrypt every live key under the current secret (the old one in AGENT_FACTORY_SECRET_KEY_PREVIOUS). A key
+    that neither secret opens is counted and left as it is: nothing is lost by a failed rotation. Idempotent."""
+    fernet = _fernet()
+    done = failed = 0
+    for credential in db.scalars(select(Credential).where(Credential.revoked_at.is_(None))):
+        try:
+            credential.ciphertext = fernet.rotate(credential.ciphertext.encode("ascii")).decode("ascii")
+            done += 1
+        except Exception:  # noqa: BLE001 - InvalidToken: neither secret opens it
+            failed += 1
+    db.commit()
+    return {"rotated": done, "unreadable": failed}
+
+
+def main() -> None:  # pragma: no cover - the command line
+    """`python -m app.credentials rotate`: after setting the new AGENT_FACTORY_SECRET_KEY and the old one as
+    AGENT_FACTORY_SECRET_KEY_PREVIOUS. When it reports 0 unreadable, the previous secret can be removed."""
+    import sys
+
+    from app.db import SessionLocal
+
+    if sys.argv[1:] != ["rotate"]:
+        raise SystemExit("usage: python -m app.credentials rotate")
+    with SessionLocal() as session:
+        print(rotate(session))
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

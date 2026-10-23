@@ -538,11 +538,17 @@ function renderDashboardBody(body, projects, usages, events){
   body.appendChild(evCard);
 }
 
+// A registry agent's description in the owner's language (G16); an agent built here keeps the text its owner wrote.
+function agentText(a){ return I18N.has('agentdesc.' + a.name) ? t('agentdesc.' + a.name) : a.description; }
+
 function eventRow(e, projectLabel){
   return el('div', {class:'event-row'},
     el('time', {text: fmtTime(e.created_at)}),
     el('div', {class:'stack', style:'gap:2px'},
-      el('div', {}, el('code', {text: e.type}), projectLabel ? el('span', {class:'muted', text:' · ' + projectLabel}) : null)
+      // Plain words for an ordinary owner; the technical name beside them only where code is shown (G15).
+      el('div', {}, I18N.has('event.' + e.type) ? t('event.' + e.type) : el('code', {text: e.type}),
+        I18N.has('event.' + e.type) && showCode() ? el('code', {class:'muted', style:'margin-inline-start:8px', text: e.type}) : null,
+        projectLabel ? el('span', {class:'muted', text:' · ' + projectLabel}) : null)
     )
   );
 }
@@ -1216,7 +1222,7 @@ function renderAgentsList(root){
         el('div', {class:'top'}, el('b', {text:a.name}),
           el('div', {class:'row'}, el('span', {class:'chip', text: lbl('role', a.model_role)}),
             a.active ? el('span', {class:'chip', text:t('common.active')}) : el('span', {class:'chip', text:t('common.inactive')}))),
-        el('span', {class:'muted', text:a.description}),
+        el('span', {class:'muted', text: agentText(a)}),
         el('div', {class:'row'}, a.capabilities.map(function(c){ return el('span', {class:'chip', text:c}); }))
       ));
     });
@@ -1274,7 +1280,7 @@ function renderAgentDetail(root, name){
   function drawOverview(panel){
     var agent = agentData, allSkills = skillsData, body = panel;
     body.appendChild(el('div', {class:'card stack'},
-      el('p', {text: agent.description}),
+      el('p', {text: agentText(agent)}),
       el('div', {class:'row'},
         el('span', {class:'chip', text: t('agent.model_role', {role: lbl('role', agent.model_role)})}),
         agent.active ? el('span', {class:'chip', text:t('common.active')}) : el('span', {class:'chip', text:t('common.inactive')}))

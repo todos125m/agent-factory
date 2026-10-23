@@ -111,7 +111,29 @@ def sync_from_files(session: Session, root: Path = REGISTRY_DIR) -> None:
     session.commit()
 
 
-def find_by_capability(session: Session, capability: str) -> list[Agent]:
-    agents = session.scalars(select(Agent).where(Agent.active).order_by(Agent.name))
+def find_by_capability(session: Session, capability: str, owner_id: int | None = None) -> list[Agent]:
+    agents = session.scalars(visible_agents(owner_id).where(Agent.active) if owner_id is not None
+                             else select(Agent).where(Agent.active).order_by(Agent.name))
     # Narrowest match first: the most specialised agent that has the capability.
     return sorted((a for a in agents if capability in a.capabilities), key=lambda a: len(a.capabilities))
+
+
+def agent_for(session: Session, name: str | None, owner_id: int, *, active: bool = True) -> Agent | None:
+    """The agent `owner_id` may use under that name: a registry agent (nothing built here has its name), or one this
+    owner built. Another account's built agent is not there for them — not listed, not planned with, not run."""
+    if not name:
+        return None
+    query = visible_agents(owner_id).where(Agent.name == name)
+    if active:
+        query = query.where(Agent.active)
+    return session.scalar(query)
+
+
+def visible_agents(owner_id: int):
+    """A select of the agents `owner_id` may see: registry agents and their own builds, never someone else's."""
+    from app.models import AgentVersion, FactorySession
+
+    built = select(AgentVersion.agent_name).distinct()
+    mine = select(AgentVersion.agent_name).join(FactorySession, FactorySession.id == AgentVersion.session_id).where(
+        FactorySession.owner_id == owner_id)
+    return select(Agent).where(Agent.name.not_in(built) | Agent.name.in_(mine)).order_by(Agent.name)

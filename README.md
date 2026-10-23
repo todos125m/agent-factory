@@ -30,7 +30,7 @@ USER → MODE → ORCHESTRATOR → TASK GRAPH → AGENT → MODEL → TOOLS → 
 | 9 — Agent Factory | Specialist spec → sandbox → evaluation → registry | |
 | 10 — Idea Hunter | Scheduled opportunity discovery | |
 | 11 — Scale | Queue workers, caching, observability, rate limits | |
-| Human-guided factory (Issue #2) | PR7: external API — scoped keys that run one activated agent version of yours inside limits you set. PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). all 7 PRs done | ✅ PR7 |
+| Human-guided factory (Issue #2) | PR8: failed-key throttling, master-secret rotation (`python -m app.credentials rotate`), plain-language event labels and translated registry-agent descriptions. PR7: external API — scoped keys that run one activated agent version of yours inside limits you set. PR6b: your own provider keys, kept encrypted, shown only masked, referenced as `cred:<id>`. PR6: workflows — agents connected by typed, validated edges, versioned, approved as one version, run as the project's tasks. PR5: deterministic build into an immutable agent version, evaluation of every test case (code check + judge model, within the build's budget, at most 3 rounds), activation only after PASS and the owner's approval, rollback. PR4: a missing specialist's step stays BLOCKED in the DAG; bounded step-by-step runs (limits, tool gateway, owner approvals, leases, crash reconciliation). PR3: design canvas, 14-section blueprint from the brief, per-build budget, light theme. PR2: adaptive intake, versioned brief, approvals. PR2a: sign-in, per-account access, Alembic migrations. PR1: four independent settings axes (UI language fa/en/tr, explanation level, code visibility; interaction policy with ceilings, quality target, reply language), coded API errors, three-language UI and interview; design docs and gap table (`docs/HUMAN_GUIDED_FACTORY.md`, `docs/FACTORY_UI_SPEC.md`, `docs/FACTORY_IMPLEMENTATION_PLAN.md`). all 7 PRs done | ✅ PR7 |
 | UI shell | Admin panel wired to the real API — dashboard, decision inbox, projects (create/plan/checkpoints/chat/events/usage), agents (incl. training feedback), layered settings, benchmark comparison, observability, installable PWA | ✅ (`web/`, served at `/app`) |
 
 ## Run locally
@@ -274,7 +274,7 @@ curl -X POST http://localhost:8000/api/v1/runs/42/answer -H "Authorization: Bear
 | POST | `/api/v1/runs/{id}/cancel` | stop the run |
 | GET/POST/DELETE | `/api-keys` | the owner's side (session): list, make (secret once), revoke |
 
-Put a rate limit in front of the server (proxy/WAF) for failed key attempts; the secret has 256 bits, but the API does not throttle.
+More than 20 failed key attempts a minute from one address get 429 before any lookup (in this process's memory; a good key is never counted). A proxy/WAF in front is still wise across processes.
 
 ### Connections: your own API keys (issue #2 PR6b)
 
@@ -283,7 +283,7 @@ Settings → Connections keeps a provider key (Anthropic, OpenAI) **encrypted** 
 reference, `cred:<id>`, chosen per model role in the model settings; the key is used only for its owner's own calls and
 its own provider, and never appears in a log, event, error, settings layer, blueprint or workflow. *Test* makes one free
 request to the provider's own list-models endpoint, only when pressed, and shows what came back. Revoking wipes the key.
-**Setup:** set `AGENT_FACTORY_SECRET_KEY` (at least 32 characters, see `.env.example`) and `pip install -e .` (the new
+**Setup:** set `AGENT_FACTORY_SECRET_KEY` (at least 32 characters, 12 different, see `.env.example`; to change it later, `AGENT_FACTORY_SECRET_KEY_PREVIOUS` + `python -m app.credentials rotate`) and `pip install -e .` (the new
 `cryptography` dependency); without them keys can't be added and the page says why. Back the secret up: without it stored
 keys can't be read.
 

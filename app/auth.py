@@ -81,7 +81,7 @@ def start_session(session: Session, user: User) -> str:
 
 
 def set_cookie(response: Response, request: Request, token: str) -> None:
-    secure = request.url.scheme == "https" or os.getenv("AGENT_FACTORY_SECURE_COOKIE") == "1"
+    secure = request.url.scheme == "https" or os.getenv("AGENT_FACTORY_SECURE_COOKIE") == "1" or behind_proxy()
     response.set_cookie(COOKIE, token, max_age=int(SESSION_TTL.total_seconds()), httponly=True, samesite="strict",
                         secure=secure, path="/")
 
@@ -166,10 +166,17 @@ def redeem_login_code(session: Session, code: str) -> User:
 # ---------- claiming an account from before login existed ----------
 
 
+def behind_proxy() -> bool:
+    """The operator says a reverse proxy fronts this server (AGENT_FACTORY_BEHIND_PROXY=1): no request is "from this
+    machine", and the session cookie is always Secure (the proxy ends TLS, so the app sees plain HTTP)."""
+    return os.getenv("AGENT_FACTORY_BEHIND_PROXY") == "1"
+
+
 def _from_this_machine(request: Request) -> bool:
     """A direct request from the server's own machine. Behind a proxy every request looks local, so any forwarding
-    header disqualifies it: then only the owner token works."""
-    if any(h in request.headers for h in FORWARDING_HEADERS):
+    header disqualifies it: then only the owner token works. A proxy that adds none of them can't be told from the
+    machine itself, so AGENT_FACTORY_BEHIND_PROXY=1 turns the shortcut off for good."""
+    if behind_proxy() or any(h in request.headers for h in FORWARDING_HEADERS):
         return False
     return request.client is not None and request.client.host in LOOPBACK
 

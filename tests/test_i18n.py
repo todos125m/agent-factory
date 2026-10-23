@@ -154,7 +154,7 @@ def test_the_language_names_are_their_own():
 
 
 # Keys app.js builds at run time: t('err.' + code), lbl(group, value) and the like.
-BUILT_PREFIXES = tuple(f"{group}." for group in LABELLED) + ("err.",)
+BUILT_PREFIXES = tuple(f"{group}." for group in LABELLED) + ("err.", "event.", "agentdesc.")
 
 
 def test_every_defined_key_is_used():
@@ -163,3 +163,26 @@ def test_every_defined_key_is_used():
     used |= set(re.findall(r'data-i18n="([\w.]+)"', (WEB / "index.html").read_text(encoding="utf-8")))
     unused = [k for k in _messages()["en"] if k not in used and not k.startswith(BUILT_PREFIXES)]
     assert unused == []
+
+
+def test_every_project_event_has_plain_words_in_every_language():
+    """G15: an ordinary owner reads "You paused the project", not `project.paused`."""
+    from tests.test_column_limits import _record_event_types
+
+    messages = _messages()
+    for event in sorted({t for _, _, t in _record_event_types()}):
+        for locale in ("fa", "en", "tr"):
+            assert f"event.{event}" in messages[locale], (locale, event)
+
+
+def test_every_registry_agent_has_a_description_in_every_language():
+    """G16: the registry's JSON is English; the UI shows the owner's language."""
+    import json
+
+    from app.registry import REGISTRY_DIR
+
+    messages = _messages()
+    for path in sorted((REGISTRY_DIR / "agents").glob("*.json")):
+        name = json.loads(path.read_text(encoding="utf-8"))["name"]
+        for locale in ("fa", "en", "tr"):
+            assert f"agentdesc.{name}" in messages[locale], (locale, name)

@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import design, factory, runtime, settings_layers, storable
+from app import design, factory, registry, runtime, settings_layers, storable
 from app.errors import AppError, not_found
 from app.events import record_event
 from app.manager import PlanIn, PlanStepIn, ensure_active, stage_plan
@@ -415,7 +415,7 @@ def plan_of(db: Session, owner: User, version: WorkflowVersion) -> tuple[PlanIn,
             depends[e["to"]["node"]].add(order[e["from"]["node"]])
     steps = []
     for n in agents:
-        known = db.scalar(select(Agent).where(Agent.name == n["agent"], Agent.active))
+        known = registry.agent_for(db, n["agent"], owner.id)
         if known is not None and (known.version != n["version"] or (n.get("pin") and n["pin"] != fingerprint(known))):
             raise AppError(409, "agent_version_changed",
                            f"'{n['agent']}' is version {known.version} now; the workflow pins version {n['version']}",
