@@ -1,9 +1,14 @@
+# One command, no setup:   docker compose up --build        then open  http://localhost:8000/app
+# Everything below has a working default. A `.env` file (optional) changes them; see .env.example.
+name: agent-factory
+
 services:
   postgres:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16}
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: agent_factory
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -12,31 +17,72 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    ports:
-      - "127.0.0.1:5432:5432"  # this machine only: the database holds hashes and encrypted keys
+    # No published port: only the api service reaches the database (it holds hashes and encrypted keys). For a look
+    # inside:  docker compose exec postgres psql -U postgres agent_factory
 
   api:
-    build: .
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
+    restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false   # optional: nothing needs editing for a first run
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/agent_factory
+      # Runs are stepped by threads inside this service. To scale them out set this to 0 and start the extra worker:
+      #   docker compose --profile workers up -d --scale worker=2
+      AGENT_FACTORY_WORKERS: ${AGENT_FACTORY_WORKERS:-1}
+    volumes:
+      - af_data:/data   # the master secret made on first start lives here (see docker/entrypoint.sh)
     ports:
-      - "8000:8000"
+      # This machine only, by default. To reach it from your phone or network set AGENT_FACTORY_BIND=0.0.0.0 in .env
+      # (and put HTTPS in front before exposing it to the internet).
+      - "${AGENT_FACTORY_BIND:-127.0.0.1}:${AGENT_FACTORY_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach an Ollama installed on this machine: http://host.docker.internal:11434
     depends_on:
       postgres:
         condition: service_healthy
-    # Bounded runs are stepped by AGENT_FACTORY_WORKERS threads inside this service (default 1, see .env.example).
-    # To scale them out, set it to 0 here and add a service running `python -m app.worker` with the same env.
 
-  # Optional, local-only model provider (model_access "ollama") — not started by `docker compose up`;
-  # run `docker compose --profile ollama up` to include it, then `docker compose exec ollama ollama pull <model>`.
+  # Optional extra workers (same image, same database); the api service then runs with AGENT_FACTORY_WORKERS=0.
+  worker:
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
+    profiles: ["workers"]
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    healthcheck:
+      disable: true   # the image's check asks the web port, which a worker doesn't serve
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/agent_factory
+      AGENT_FACTORY_WORKERS: "1"
+    volumes:
+      - af_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Optional, local-only model provider (model_access "ollama") inside Docker — not started by `docker compose up`;
+  # `docker compose --profile ollama up`, then `docker compose exec ollama ollama pull qwen2.5:7b`, and in .env
+  # OLLAMA_BASE_URL=http://ollama:11434.  (An Ollama installed on this machine is simpler, esp. with a GPU on Windows.)
   ollama:
     image: ollama/ollama
     profiles: ["ollama"]
     volumes:
       - ollama_data:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
 
 volumes:
   postgres_data:
+  af_data:
   ollama_data:
