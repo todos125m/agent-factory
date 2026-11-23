@@ -147,9 +147,10 @@ def test_list_model_calls_for_a_project(session, client):
     assert client.get("/projects/999/model_calls").status_code == 404
 
 
-def test_failed_call_is_logged_and_unavailable_provider_errors(session):
+def test_failed_call_is_logged_and_unavailable_provider_errors(session, monkeypatch):
+    monkeypatch.setitem(__import__("sys").modules, "openai", None)  # as if the optional package were missing (it is in Docker)
     project = make_project(session)
-    gw = Gateway(session)  # real providers; the optional `openai` package isn't installed here
+    gw = Gateway(session)  # real providers
     from app.models import SettingsLayer, SettingsScope
 
     session.add(SettingsLayer(scope=SettingsScope.PROJECT, scope_id=project.id, values={

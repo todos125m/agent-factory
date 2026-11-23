@@ -371,50 +371,13 @@ function renderSetup(root){
   }
 
   function modelCard(s){
-    var m = s.model, docker = s.server.in_docker;
+    var m = s.model;
     var card = el('div', {class:'card stack'}, el('h3', {text:t('setup.step_model')}),
       el('p', {}, el('b', {text:t('setup.method') + ': '}), lbl('access', m.access)),
       el('p', {class:'muted', text:t('setup.change_method')}));
-    var steps = el('div', {class:'stack'});
-    if (m.access === 'claude_account'){
-      steps.appendChild(checkRow(m.claude.cli, t('setup.check_cli')));
-      steps.appendChild(checkRow(m.claude.token, t('setup.check_token')));
-      if (docker){
-        steps.appendChild(el('b', {text:t('setup.claude_docker_title')}));
-        steps.appendChild(el('p', {text:'1. ' + t('setup.claude_docker_1')})); steps.appendChild(codeLine('claude setup-token'));
-        steps.appendChild(el('p', {text:'2. ' + t('setup.claude_docker_2')}));
-        steps.appendChild(el('p', {text:'3. ' + t('setup.claude_docker_3')})); steps.appendChild(codeLine('CLAUDE_CODE_OAUTH_TOKEN=...'));
-        steps.appendChild(el('p', {text:'4. ' + t('setup.claude_docker_4')})); steps.appendChild(codeLine('docker compose up -d'));
-      } else {
-        steps.appendChild(el('b', {text:t('setup.claude_local_title')}));
-        steps.appendChild(el('p', {text:'1. ' + t('setup.claude_local_1')})); steps.appendChild(codeLine('claude'));
-        steps.appendChild(el('p', {text:'2. ' + t('setup.claude_local_2')}));
-      }
-    } else if (m.access === 'api_key'){
-      steps.appendChild(checkRow(m.anthropic_key || m.connections.indexOf('anthropic') >= 0, t('setup.check_anthropic')));
-      steps.appendChild(el('b', {text:t('setup.apikey_title')}));
-      steps.appendChild(el('p', {text:'A. ' + t('setup.apikey_a')})); steps.appendChild(codeLine('ANTHROPIC_API_KEY=...'));
-      steps.appendChild(el('p', {text:'B. ' + t('setup.apikey_b')}));
-      steps.appendChild(el('p', {text:t('setup.apikey_c')}));
-    } else if (m.access === 'ollama'){
-      var o = m.ollama || {reachable:false, models:[], missing:[], url:''};
-      steps.appendChild(checkRow(o.reachable, t('setup.check_ollama', {url: o.url})));
-      if (o.reachable) steps.appendChild(el('p', {class:'muted', text:t('setup.check_ollama_models', {models: o.models.join(', ') || '—'})}));
-      if (o.reachable && o.missing.length) steps.appendChild(el('p', {class:'err', text:t('setup.ollama_missing', {models: o.missing.join(', ')})}));
-      steps.appendChild(el('b', {text:t('setup.ollama_title')}));
-      steps.appendChild(el('p', {text:'1. ' + t('setup.ollama_1')}));
-      steps.appendChild(codeLine('ollama pull ' + ((o.missing && o.missing[0]) || 'qwen2.5:7b')));
-      steps.appendChild(el('p', {text:'2. ' + t('setup.ollama_2')}));
-      if (docker){ steps.appendChild(el('p', {text:'3. ' + t('setup.ollama_3_docker')})); steps.appendChild(codeLine('OLLAMA_BASE_URL=http://host.docker.internal:11434')); }
-      steps.appendChild(el('p', {class:'muted', text:t('setup.ollama_note')}));
-    }
-    card.appendChild(steps);
-
-    var tester = modelTester(s.is_admin);
-    card.appendChild(el('div', {class:'btn-row'}, tester.button,
-      el('button', {class:'btn ghost', type:'button', onclick:function(){ go('settings'); }}, t('setup.open_settings'))));
-    card.appendChild(tester.help);
-    card.appendChild(tester.result);
+    card.appendChild(el('p', {class:'muted', text:t('setup.pick_method')}));
+    var open = m.access === 'claude_account' ? 'claude' : (m.access === 'ollama' ? 'ollama' : null);
+    GUIDE_GROUPS[0].topics.forEach(function(id){ card.appendChild(topicCard(id, id === open)); });
     return card;
   }
 
@@ -449,7 +412,7 @@ function renderSetup(root){
 // its steps, or several variants (each its own steps). A step may carry a line to copy. Text: i18n.js guide.<topic>.<n>.
 // The hash keeps the choice (#guide/claude/docker), so a link goes straight to it.
 var GUIDE_GROUPS = [
-  {title:'guide.group.model', topics:['claude', 'ollama', 'apikey']},
+  {title:'guide.group.model', topics:['claude', 'ollama', 'anthropic', 'openai', 'google', 'openrouter', 'groq', 'mistral', 'cerebras', 'github', 'other', 'free']},
   {title:'guide.group.use', topics:['roles', 'first', 'workflow', 'api', 'people', 'keep']}
 ];
 var GUIDE = {
@@ -460,7 +423,6 @@ var GUIDE = {
     {id:'computer', steps:[{n:1, code:'ollama pull qwen2.5:7b'}, {n:2}, {n:3, code:'OLLAMA_BASE_URL=http://host.docker.internal:11434'}, {n:6}, {n:7}]},
     {id:'docker', steps:[{n:4, code:'docker compose --profile ollama up -d'}, {n:5, code:'docker compose exec ollama ollama pull qwen2.5:7b'},
       {n:5, code:'OLLAMA_BASE_URL=http://ollama:11434', same:true}, {n:6}, {n:7}]}]},
-  apikey: {steps:[{n:1}, {n:2}, {n:3}, {n:4, code:'ANTHROPIC_API_KEY=...'}]},
   roles: {steps:[{n:1}, {n:2}, {n:3}, {n:4}]},
   first: {steps:[{n:1}, {n:2}, {n:3}, {n:4}, {n:5}]},
   workflow: {steps:[{n:1}, {n:2}, {n:3}]},
@@ -468,6 +430,31 @@ var GUIDE = {
   people: {steps:[{n:1}, {n:2}, {n:3}]},
   keep: {steps:[{n:1, code:'git pull && docker compose up -d --build'}, {n:2}, {n:3}, {n:4}, {n:5, code:'docker compose logs api'}]}
 };
+
+// The providers the key box knows: Anthropic's own protocol, OpenAI's, and the others that speak the OpenAI protocol at
+// their own address ("other": any address from a provider's docs). `model` is only a hint of what a name looks like;
+// `site` is where a key is made.
+var KEY_PROVIDERS = [
+  {id:'anthropic', name:'Anthropic', native:true, site:'https://console.anthropic.com/settings/keys'},
+  {id:'openai', name:'OpenAI', model:'gpt-5-mini', site:'https://platform.openai.com/api-keys'},
+  {id:'google', name:'Google Gemini', url:'https://generativelanguage.googleapis.com/v1beta/openai', model:'gemini-2.5-flash', site:'https://aistudio.google.com/apikey'},
+  {id:'openrouter', name:'OpenRouter', url:'https://openrouter.ai/api/v1', model:'vendor/model-name:free', site:'https://openrouter.ai/keys'},
+  {id:'groq', name:'Groq', url:'https://api.groq.com/openai/v1', model:'openai/gpt-oss-20b', site:'https://console.groq.com/keys'},
+  {id:'mistral', name:'Mistral', url:'https://api.mistral.ai/v1', model:'mistral-small-latest', site:'https://console.mistral.ai/api-keys'},
+  {id:'cerebras', name:'Cerebras', url:'https://api.cerebras.ai/v1', model:'', site:'https://cloud.cerebras.ai/'},
+  {id:'github', name:'GitHub Models', url:'https://models.github.ai/inference', model:'openai/gpt-4.1-mini', site:'https://github.com/marketplace/models'},
+  {id:'other', name:'', model:'', site:''}
+];
+KEY_PROVIDERS.forEach(function(k){
+  GUIDE[k.id] = {key:k, text:'apikey', steps:[{n:1}, {n:2}, {n:3}].concat(k.id === 'anthropic' ? [{n:4, code:'ANTHROPIC_API_KEY=...'}] : [])};
+});
+GUIDE.free = {custom:true, steps:[]};
+
+function topicTitle(id){
+  var topic = GUIDE[id];
+  if (topic.key) return topic.key.id === 'other' ? t('guide.connect.other') : t('guide.key_title', {name: topic.key.name});
+  return t('guide.' + id + '.title');
+}
 
 // The global layer is every account's default model route; only the admin writes it. Read, change one thing, write back.
 function changeGlobalSettings(change){
@@ -492,19 +479,6 @@ function resetRoutes(values, method){
   if (!Object.keys(models).length) delete values.models;
 }
 
-// The providers the key box knows: Anthropic's own protocol, OpenAI's, and the others that speak the OpenAI protocol at
-// their own address ("other": any address from a provider's docs). `model` is only a hint of what a name looks like.
-var KEY_PROVIDERS = [
-  {id:'anthropic', name:'Anthropic', native:true},
-  {id:'openai', name:'OpenAI', model:'gpt-5-mini'},
-  {id:'google', name:'Google Gemini', url:'https://generativelanguage.googleapis.com/v1beta/openai', model:'gemini-2.5-flash'},
-  {id:'openrouter', name:'OpenRouter', url:'https://openrouter.ai/api/v1', model:'vendor/model-name:free'},
-  {id:'groq', name:'Groq', url:'https://api.groq.com/openai/v1', model:'openai/gpt-oss-20b'},
-  {id:'mistral', name:'Mistral', url:'https://api.mistral.ai/v1', model:'mistral-small-latest'},
-  {id:'cerebras', name:'Cerebras', url:'https://api.cerebras.ai/v1', model:''},
-  {id:'github', name:'GitHub Models', url:'https://models.github.ai/inference', model:'openai/gpt-4.1-mini'},
-  {id:'other', name:'', model:''}
-];
 
 // "Do it here": the choice made in the guide is applied by the guide, then tested. Status comes from /setup/status.
 function connectPanel(topicId){
@@ -547,37 +521,23 @@ function connectPanel(topicId){
           if (name){ v.models = v.models || {}; MODEL_ROLES.forEach(function(r){ v.models[r] = Object.assign({}, v.models[r], {model: name}); }); }
         }).then(applied).catch(failed).then(function(){ use.disabled = false; });
       });
-    } else if (topicId === 'apikey'){
+    } else if (GUIDE[topicId] && GUIDE[topicId].key){
+      var k = GUIDE[topicId].key;
       if (!s.keys.available){
         slot.appendChild(el('p', {class:'notice', role:'status', text:t(s.keys.reason === 'crypto_unavailable' ? 'setup.keys_crypto' : 'setup.keys_secret')}));
       } else {
-        var preset = el('select', {'aria-label':t('guide.connect.provider')});
-        KEY_PROVIDERS.forEach(function(k, i){ preset.appendChild(el('option', {value:String(i)}, k.id === 'other' ? t('guide.connect.other') : k.name)); });
         var address = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.base_url'), placeholder:'https://api.example.com/v1'});
-        var modelName = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.model')});
+        address.value = k.url || ''; address.readOnly = !!k.url;
+        var modelName = el('input', {type:'text', dir:'ltr', spellcheck:'false', 'aria-label':t('guide.connect.model'), placeholder:k.model || ''});
         // password, no autofill, no spellcheck: typed or pasted once, and the field is emptied at once
         var key = el('input', {type:'password', autocomplete:'off', spellcheck:'false', dir:'ltr', 'aria-label':t('guide.connect.key_label'), placeholder:'sk-...'});
-        var addressRow = el('label', {class:'f'}, t('guide.connect.base_url'), address);
-        var modelRow = el('label', {class:'f'}, t('guide.connect.model'), modelName);
-        function current(){ return KEY_PROVIDERS[Number(preset.value)]; }
-        function showPreset(){
-          var k = current();
-          address.value = k.url || ''; address.readOnly = !!k.url;
-          addressRow.hidden = !(k.id === 'other' || k.url);
-          modelRow.hidden = !!k.native;
-          modelName.placeholder = k.model || '';
-          modelName.value = '';
-        }
-        preset.addEventListener('change', showPreset);
-        slot.appendChild(el('label', {class:'f'}, t('guide.connect.provider'), preset));
-        slot.appendChild(addressRow); slot.appendChild(modelRow);
+        if (k.id === 'other' || k.url) slot.appendChild(el('label', {class:'f'}, t('guide.connect.base_url'), address));
+        if (!k.native) slot.appendChild(el('label', {class:'f'}, t('guide.connect.model'), modelName));
         slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_label'), key));
         slot.appendChild(el('p', {class:'muted', text:t('guide.connect.key_help')}));
-        if (!admin) slot.appendChild(el('p', {class:'muted', text:t('guide.connect.address_admin')}));
-        showPreset();
+        if (!admin && !k.native) slot.appendChild(el('p', {class:'muted', text:t('guide.connect.address_admin')}));
         use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_apikey'), disabled: admin ? null : 'disabled'});
         use.addEventListener('click', function(){
-          var k = current();
           var model = modelName.value.trim();
           if (!key.value) return;
           if (!k.native && !model){ message.className = 'err'; message.textContent = t('guide.connect.model_needed'); return; }
@@ -613,7 +573,7 @@ function connectPanel(topicId){
     slot.appendChild(el('div', {class:'btn-row'}, tester.button));
     slot.appendChild(tester.help);
     slot.appendChild(tester.result);
-  }).catch(function(e){ clear(slot); slot.appendChild(errorBox(e.message, function(){ go('guide/' + topicId); })); });
+  }).catch(function(e){ clear(slot); slot.appendChild(errorBox(e.message, function(){ route(); })); });
   return box;
 }
 
@@ -642,11 +602,54 @@ function freeApisCard(){
   return card;
 }
 
+// One topic's content: its variants, numbered steps, the "Do it here" box (a way to connect a model), the free list.
+// `setVariant(id)`: what a click on a variant does (the Guide changes the link, Setup redraws the card).
+function topicBody(topicId, variantId, setVariant){
+  var topic = GUIDE[topicId];
+  var box = el('div', {class:'stack'});
+  if (topic.custom){ box.appendChild(freeApisCard()); return box; }
+  var variant = topic.variants ? (topic.variants.filter(function(v){ return v.id === variantId; })[0] || topic.variants[0]) : null;
+  if (variant){
+    var vrow = el('div', {class:'row', role:'radiogroup'});
+    topic.variants.forEach(function(v){
+      var vb = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': v === variant ? 'true' : 'false', style:'width:auto'},
+        el('span', {}, el('b', {text:t('guide.variant.' + topicId + '.' + v.id)})));
+      vb.addEventListener('click', function(){ setVariant(v.id); });
+      vrow.appendChild(vb);
+    });
+    box.appendChild(vrow);
+  }
+  var count = 0;
+  (variant ? variant.steps : topic.steps).forEach(function(st){
+    if (!st.same){
+      count += 1;
+      var line = el('p', {text:fmtNum(count) + '. ' + t('guide.' + (topic.text || topicId) + '.' + st.n)});
+      if (st.n === 1 && topic.key && topic.key.site){
+        line.appendChild(document.createTextNode(' '));
+        line.appendChild(el('a', {href:topic.key.site, target:'_blank', rel:'noopener noreferrer', dir:'ltr', text:t('guide.get_key')}));
+      }
+      box.appendChild(line);
+    }
+    if (st.code) box.appendChild(codeLine(st.code));
+  });
+  if (topicId === 'claude' || topicId === 'ollama' || topic.key) box.appendChild(connectPanel(topicId));
+  return box;
+}
+
+// A topic as a card that opens (Setup): built when first opened, so Ollama is only asked about when its card is.
+function topicCard(topicId, open){
+  var d = el('details', {class:'card guide-topic', style:'background:var(--surface-2)'}, el('summary', {text:topicTitle(topicId)}));
+  var content = el('div', {class:'stack'});
+  d.appendChild(content);
+  var built = false;
+  function show(variantId){ clear(content); content.appendChild(topicBody(topicId, variantId, show)); }
+  d.addEventListener('toggle', function(){ if (d.open && !built){ built = true; show(null); } });
+  if (open) d.setAttribute('open', '');
+  return d;
+}
+
 function renderGuide(root, parts){
   var topicId = parts && GUIDE[parts[1]] ? parts[1] : null;
-  var topic = topicId ? GUIDE[topicId] : null;
-  var variant = null;
-  if (topic && topic.variants) variant = topic.variants.filter(function(v){ return v.id === (parts[2] || ''); })[0] || topic.variants[0];
 
   root.appendChild(el('div', {class:'page-head'}, el('h2', {text:t('guide.title')})));
   var body = el('div', {class:'stack'});
@@ -655,9 +658,8 @@ function renderGuide(root, parts){
   GUIDE_GROUPS.forEach(function(group){
     var grid = el('div', {class:'grid grid-2', role:'radiogroup', 'aria-label':t(group.title)});
     group.topics.forEach(function(id){
-      var on = id === topicId;
-      var b = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': on ? 'true' : 'false'},
-        el('span', {}, el('b', {text:t('guide.' + id + '.title')})));
+      var b = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': id === topicId ? 'true' : 'false'},
+        el('span', {}, el('b', {text:topicTitle(id)})));
       b.addEventListener('click', function(){ go('guide/' + id); });
       grid.appendChild(b);
     });
@@ -666,32 +668,16 @@ function renderGuide(root, parts){
   });
 
   var panel = el('div', {class:'card stack guide-panel', id:'guide-panel'});
-  if (!topic){
+  if (!topicId){
     panel.appendChild(el('p', {class:'muted', text:t('guide.pick')}));
   } else {
-    panel.appendChild(el('h3', {text:t('guide.' + topicId + '.title')}));
-    if (variant){
-      var vrow = el('div', {class:'row', role:'radiogroup'});
-      topic.variants.forEach(function(v){
-        var vb = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': v === variant ? 'true' : 'false', style:'width:auto'},
-          el('span', {}, el('b', {text:t('guide.variant.' + topicId + '.' + v.id)})));
-        vb.addEventListener('click', function(){ go('guide/' + topicId + '/' + v.id); });
-        vrow.appendChild(vb);
-      });
-      panel.appendChild(vrow);
-    }
-    var count = 0;
-    (variant ? variant.steps : topic.steps).forEach(function(st){
-      if (!st.same){ count += 1; panel.appendChild(el('p', {text:fmtNum(count) + '. ' + t('guide.' + topicId + '.' + st.n)})); }
-      if (st.code) panel.appendChild(codeLine(st.code));
-    });
-    if (topicId === 'claude' || topicId === 'ollama' || topicId === 'apikey') panel.appendChild(connectPanel(topicId));
-    if (topicId === 'apikey') panel.appendChild(freeApisCard());
+    panel.appendChild(el('h3', {text:topicTitle(topicId)}));
+    panel.appendChild(topicBody(topicId, parts[2] || '', function(v){ go('guide/' + topicId + '/' + v); }));
   }
   body.appendChild(panel);
   body.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn ghost', type:'button', onclick:function(){ go('setup'); }}, t('guide.open_setup'))));
   root.appendChild(body);
-  if (topic){ try { panel.scrollIntoView({block:'nearest'}); } catch (e){} }
+  if (topicId){ try { panel.scrollIntoView({block:'nearest'}); } catch (e){} }
 }
 
 /* ============================== router ============================== */

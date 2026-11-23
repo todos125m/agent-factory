@@ -170,9 +170,10 @@ def test_sdk_exception_is_wrapped_in_provider_error():
         _provider(create).complete(REQUEST)
 
 
-def test_missing_package_raises_provider_error():
-    """The `openai` package is an optional extra and isn't installed in this dev/test env — exercises
-    the real lazy-import path, not a mock."""
+def test_missing_package_raises_provider_error(monkeypatch):
+    """The `openai` package is an optional extra (installed in the Docker image, not always in a dev env): a None entry
+    in sys.modules makes the real lazy import fail as if it were missing."""
+    monkeypatch.setitem(__import__("sys").modules, "openai", None)
     with pytest.raises(ProviderError, match="not installed"):
         OpenAIProvider().complete(REQUEST)
 
