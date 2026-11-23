@@ -168,6 +168,13 @@ def design_approve(session_id: int, body: DesignApproveIn, locale: str | None = 
     return _view(db, me, factory.load_session(db, fs.id, me), locale, duplicate=not applied)
 
 
+@router.post("/sessions/{session_id}/design/propose-schema")
+def design_propose_schema(session_id: int, body: Change, db: Session = Depends(get_session),
+                          me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)):
+    """A paid model call, asked for: a proposed output schema from the expected output. Nothing is stored."""
+    return design.propose_output_schema(db, gateway, me, session_id, expected_revision=body.expected_revision)
+
+
 @router.post("/sessions/{session_id}/design/assist")
 def design_assist(session_id: int, body: Change, locale: str | None = None, db: Session = Depends(get_session),
                   me: User = Depends(current_user), gateway: Gateway = Depends(get_gateway)) -> dict[str, Any]:

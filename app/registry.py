@@ -37,6 +37,7 @@ class AgentSpec(StorableIn):
     permissions: dict[str, Any] = Field(default_factory=dict)
     skills: list[str] = Field(default_factory=list)
     instructions: str = ""
+    output_schema: dict[str, Any] | None = None  # app/output_schema.py: checked when a version is built
 
     @field_validator("model_role")
     @classmethod

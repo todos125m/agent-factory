@@ -74,35 +74,48 @@ class OpenAIProvider:
                 "this OpenAI integration has no web search capability; set model_access to "
                 "'claude_account' or 'api_key' for this role, or remove the 'web_search' tool from the agent"
             )
-        # Another provider that speaks the OpenAI protocol (a connection with an address): only what they all accept.
-        # No reasoning_effort, max_tokens, and the JSON schema goes into the prompt instead of response_format.
+        # Another provider that speaks the OpenAI protocol (a connection with an address): only what they all accept
+        # (no reasoning_effort, max_tokens). The JSON schema is sent as a real response schema first; a provider that
+        # refuses it (HTTP 400/422), or a schema that uses $ref (few accept those), gets it in the prompt instead.
         compatible = bool(request.base_url)
-        system = request.system
-        if compatible and request.json_schema:
-            system += ("\n\nReply with one JSON object only, no other text, that follows this JSON schema:\n"
-                       + json.dumps(request.json_schema))
-        kwargs: dict[str, Any] = {
-            "model": request.model,
-            ("max_tokens" if compatible else "max_completion_tokens"): request.max_output_tokens,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": request.user},
-            ],
-        }
-        if request.json_schema and not compatible:
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "response", "schema": request.json_schema, "strict": False},
-            }
-        if request.effort and not compatible:
-            kwargs["reasoning_effort"] = request.effort
+        schema = request.json_schema
+        modes = ["native"]
+        if compatible and schema:
+            modes = ["prompt"] if '"$ref"' in json.dumps(schema) else ["native", "prompt"]
 
-        try:
-            response = self._get_client(request.api_key, request.base_url).chat.completions.create(**kwargs)
-        except ProviderError:
-            raise
-        except Exception as e:  # the openai SDK's own exception hierarchy (auth/rate-limit/API errors)
-            raise ProviderError(f"OpenAI error: {e}{_detail(e)}") from e
+        def build(mode: str) -> dict[str, Any]:
+            system = request.system
+            if compatible and schema and mode == "prompt":
+                system += ("\n\nReply with one JSON object only, no other text, that follows this JSON schema:\n"
+                           + json.dumps(schema))
+            kwargs: dict[str, Any] = {
+                "model": request.model,
+                ("max_tokens" if compatible else "max_completion_tokens"): request.max_output_tokens,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": request.user},
+                ],
+            }
+            if schema and mode == "native":
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "response", "schema": schema, "strict": False},
+                }
+            if request.effort and not compatible:
+                kwargs["reasoning_effort"] = request.effort
+            return kwargs
+
+        response = None
+        for attempt, mode in enumerate(modes):
+            try:
+                response = self._get_client(request.api_key, request.base_url).chat.completions.create(**build(mode))
+                break
+            except ProviderError:
+                raise
+            except Exception as e:  # the openai SDK's own exception hierarchy (auth/rate-limit/API errors)
+                if attempt + 1 < len(modes) and getattr(e, "status_code", None) in (400, 422):
+                    continue  # the provider refused the response schema: ask again with it in the prompt
+                raise ProviderError(f"OpenAI error: {e}{_detail(e)}") from e
 
         if not response.choices:
             raise ProviderError("OpenAI returned no choices")
