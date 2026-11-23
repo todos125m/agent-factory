@@ -319,7 +319,7 @@ function setupIncomplete(s){
   var m = s.model;
   // In Docker the Claude tool exists but can't log in: it needs the token. Locally the tool being there is the start.
   if (m.access === 'claude_account') return s.server.in_docker ? !m.claude.token : !m.claude.cli;
-  if (m.access === 'api_key') return !(m.anthropic_key || m.connections.indexOf('anthropic') >= 0);
+  if (m.access === 'api_key') return !(m.anthropic_key || m.openai_key || m.connections.length > 0);  // a key of any provider counts
   if (m.access === 'ollama') return !(m.ollama && m.ollama.reachable);
   return false;
 }
