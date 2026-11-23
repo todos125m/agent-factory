@@ -155,7 +155,7 @@ def test_the_language_names_are_their_own():
 
 
 # Keys app.js builds at run time: t('err.' + code), lbl(group, value) and the like.
-BUILT_PREFIXES = tuple(f"{group}." for group in LABELLED) + ("err.", "event.", "agentdesc.", "guide.")
+BUILT_PREFIXES = tuple(f"{group}." for group in LABELLED) + ("err.", "event.", "agentdesc.", "guide.", "setup.way_")
 
 
 def test_every_defined_key_is_used():
