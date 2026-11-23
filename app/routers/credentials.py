@@ -43,6 +43,12 @@ def test_credential(credential_id: int, db: Session = Depends(get_session), me: 
     return credentials.view(credentials.test(db, me, credential_id))
 
 
+@router.get("/{credential_id}/models")
+def credential_models(credential_id: int, db: Session = Depends(get_session), me: User = Depends(current_user)):
+    """The model names this key can use, as the provider lists them (one free request, made because you asked)."""
+    return credentials.list_models(db, me, credential_id)
+
+
 @router.delete("/{credential_id}")
 def revoke_credential(credential_id: int, db: Session = Depends(get_session), me: User = Depends(current_user)):
     return credentials.view(credentials.revoke(db, me, credential_id))

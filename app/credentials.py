@@ -15,6 +15,7 @@
 import base64
 import functools
 import hashlib
+import json
 import os
 import re
 import urllib.error
@@ -197,6 +198,49 @@ def _http_status(url: str, headers: dict[str, str]) -> int | None:
         return e.code
     except Exception:  # noqa: BLE001 - no network, DNS, TLS, timeout: all "no answer"
         return None
+
+
+def _http_json(url: str, headers: dict[str, str]) -> tuple[int | None, Any]:
+    """Like _http_status, and the JSON body when there is one (at most 1 MB, never followed to another address)."""
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=TEST_TIMEOUT_S) as response:
+            return response.status, json.loads(response.read(1_000_000))
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except Exception:  # noqa: BLE001 - no network, DNS, TLS, timeout, a body that is not JSON
+        return None, None
+
+
+def _decrypted(db: Session, owner: User, credential_id: int) -> tuple[Credential, str]:
+    credential = load(db, credential_id, owner)
+    if credential.revoked_at is not None:
+        raise AppError(409, "credential_revoked", "This connection was revoked")
+    try:
+        return credential, _fernet().decrypt(credential.ciphertext.encode("ascii")).decode("utf-8")
+    except AppError:
+        raise
+    except Exception as e:  # noqa: BLE001 - a changed master secret (InvalidToken); quote nothing
+        raise AppError(409, "credential_unreadable", "This key can't be read with the server's current secret") from e
+
+
+def list_models(db: Session, owner: User, credential_id: int) -> dict[str, Any]:
+    """The model names the provider says this key can use (its own list-models answer), because the owner asked.
+    Names only: the key never leaves the server. A provider that prefixes names with "models/" is shown without it."""
+    credential, key = _decrypted(db, owner, credential_id)
+    provider, base_url = credential.provider, credential.base_url
+    db.rollback()  # nothing of this request is open while the provider answers
+    url = base_url + "/models" if base_url else TEST_URLS[provider]
+    code, body = _http_json(url, _headers(provider, key))
+    if code != 200 or not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        return {"result": "ok" if code == 200 else ("rejected" if code in (401, 403) else "unreachable"), "models": []}
+    names = sorted({str(m.get("id", "")).removeprefix("models/") for m in body["data"] if isinstance(m, dict) and m.get("id")})
+    return {"result": "ok", "models": [n for n in names if 0 < len(n) <= 200][:300]}
 
 
 def test(db: Session, owner: User, credential_id: int) -> Credential:

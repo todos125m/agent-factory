@@ -478,6 +478,43 @@ function resetRoutes(values, method){
 }
 
 
+// A key already saved for this provider: ask the provider which models it can use, then pick one for every role
+// (a wrong model name is the usual reason a first test fails with 404).
+function savedModels(k, admin, modelName){
+  var box = el('div', {class:'stack'});
+  var kind = k.native ? 'anthropic' : 'openai';
+  api('/credentials').then(function(r){
+    var mine = r.items.filter(function(c){ return c.provider === kind && (k.id === 'other' ? !!c.base_url : (c.base_url || '') === (k.url || '')); });
+    if (!mine.length) return;
+    var cred = mine[mine.length - 1];
+    var out = el('div', {class:'stack'});
+    var show = el('button', {class:'btn ghost sm', type:'button', text:t('guide.connect.models_button') + ' (' + cred.name + ')'});
+    show.addEventListener('click', function(){
+      show.disabled = true; clear(out);
+      api('/credentials/' + cred.id + '/models').then(function(res){
+        show.disabled = false;
+        if (res.result !== 'ok'){ out.appendChild(el('p', {class:'err', text:t('guide.connect.key_result', {result: lbl('ctest', res.result)})})); return; }
+        if (!res.models.length){ out.appendChild(el('p', {class:'muted', text:t('guide.connect.models_none')})); return; }
+        var pick = el('select', {'aria-label':t('guide.connect.model'), dir:'ltr'});
+        res.models.forEach(function(m){ pick.appendChild(el('option', {value:m}, m)); });
+        var apply = el('button', {class:'btn sm', type:'button', text:t('guide.connect.use_model'), disabled: admin ? null : 'disabled'});
+        var done = el('p', {class:'muted', role:'status'});
+        apply.addEventListener('click', function(){
+          apply.disabled = true;
+          changeGlobalSettings(function(v){
+            v.models = v.models || {};
+            MODEL_ROLES.forEach(function(r){ v.models[r] = Object.assign({}, v.models[r], {model: pick.value}); });
+          }).then(function(){ modelName.value = pick.value; done.className = 'ok-line'; done.textContent = t('guide.connect.model_set', {model: pick.value}); })
+            .catch(function(e){ done.className = 'err'; done.textContent = e.message; }).then(function(){ apply.disabled = !admin; });
+        });
+        out.appendChild(el('div', {class:'row'}, pick, apply)); out.appendChild(done);
+      }).catch(function(e){ show.disabled = false; out.appendChild(el('p', {class:'err', text:e.message})); });
+    });
+    box.appendChild(show); box.appendChild(out);
+  }).catch(function(){});
+  return box;
+}
+
 // "Do it here": the choice made in the guide is applied by the guide, then tested. Status comes from /setup/status.
 function connectPanel(topicId){
   var box = el('div', {class:'card stack', style:'background:var(--surface-2)'}, el('h4', {text:t('guide.connect.title')}));
@@ -534,6 +571,7 @@ function connectPanel(topicId){
         slot.appendChild(el('label', {class:'f'}, t('guide.connect.key_label'), key));
         slot.appendChild(el('p', {class:'muted', text:t('guide.connect.key_help')}));
         if (!admin && !k.native) slot.appendChild(el('p', {class:'muted', text:t('guide.connect.address_admin')}));
+        slot.appendChild(savedModels(k, admin, modelName));
         use = el('button', {class:'btn', type:'button', text:t('guide.connect.use_apikey'), disabled: admin ? null : 'disabled'});
         use.addEventListener('click', function(){
           var model = modelName.value.trim();

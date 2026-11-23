@@ -353,9 +353,15 @@ def test_the_paid_sdk_clients_are_built_with_the_limits_the_hold_ttl_assumes(mon
     """HOLD_TTL must outlast the longest a paid call can run, which the SDKs' own timeout and retries decide; both
     clients are built with those limits pinned (stand-ins here: the SDKs are optional installs)."""
     made = {}
+
+    class Timeout:  # what each SDK re-exports from its HTTP library
+        def __init__(self, read, connect=None):
+            self.read, self.connect = read, connect
+
     for module, client in (("anthropic", "Anthropic"), ("openai", "OpenAI")):
         monkeypatch.setitem(
-            sys.modules, module, SimpleNamespace(**{client: lambda module=module, **kwargs: made.setdefault(module, kwargs)}),
+            sys.modules, module,
+            SimpleNamespace(Timeout=Timeout, **{client: lambda module=module, **kwargs: made.setdefault(module, kwargs)}),
         )
     AnthropicProvider()._get_client()
     OpenAIProvider()._get_client()
