@@ -483,3 +483,25 @@ def test_a_call_with_no_project_uses_the_connections_of_the_owner_it_names(clien
         gateway(s, fake).call("cheap", system="s", user="u", owner_id=owner_id)
         gateway(s, fake).call("cheap", system="s", user="u")  # no owner: the server's own key (none here)
     assert fake.keys == [KEY, None]
+
+
+def test_the_models_a_key_can_use_are_listed_by_name_only(client, monkeypatch):
+    seen = []
+    body = {"data": [{"id": "models/gemini-b"}, {"id": "gemini-a"}, {"id": "gemini-a"}, {"nope": 1}]}
+    monkeypatch.setattr(credentials, "_http_json", lambda url, headers: seen.append((url, headers)) or (200, body))
+    c = made(client, provider="openai", name="Gemini", base_url=GEMINI)
+    r = client.get(f"/credentials/{c['id']}/models")
+    assert r.status_code == 200 and r.json() == {"result": "ok", "models": ["gemini-a", "gemini-b"]}
+    assert seen == [(GEMINI.rstrip("/") + "/models", {"Authorization": f"Bearer {KEY}"})] and KEY not in r.text
+    monkeypatch.setattr(credentials, "_http_json", lambda url, headers: (401, None))
+    assert client.get(f"/credentials/{c['id']}/models").json() == {"result": "rejected", "models": []}
+    monkeypatch.setattr(credentials, "_http_json", lambda url, headers: (None, None))
+    assert client.get(f"/credentials/{c['id']}/models").json() == {"result": "unreachable", "models": []}
+
+
+def test_only_the_owner_lists_the_models_of_a_connection(client, monkeypatch):
+    monkeypatch.setattr(credentials, "_http_json", lambda url, headers: (200, {"data": []}))
+    c = made(client)
+    other = client.post("/users", json={"email": "other@example.com"}).json()
+    client.sign_in_as(other["id"])
+    assert client.get(f"/credentials/{c['id']}/models").status_code == 404
