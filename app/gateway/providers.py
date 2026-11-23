@@ -21,11 +21,11 @@ RETRY_WAIT_S = 60.0
 MAX_CALL_S = (MAX_RETRIES + 1) * REQUEST_TIMEOUT_S + MAX_RETRIES * RETRY_WAIT_S
 
 
-def paid_client_limits() -> dict[str, Any]:
-    """The keyword arguments both paid SDK clients (anthropic.Anthropic, openai.OpenAI) take for the limits above."""
-    import httpx  # a dependency of both SDKs, so there whenever one is
-
-    return {"timeout": httpx.Timeout(REQUEST_TIMEOUT_S, connect=CONNECT_TIMEOUT_S), "max_retries": MAX_RETRIES}
+def paid_client_limits(sdk: Any) -> dict[str, Any]:
+    """The keyword arguments a paid SDK client (anthropic.Anthropic, openai.OpenAI) takes for the limits above. The SDK
+    module itself is passed: it re-exports the Timeout class of the HTTP library it uses (httpx for one, httpx2 for
+    newer releases of the other), so no HTTP package is imported here by name."""
+    return {"timeout": sdk.Timeout(REQUEST_TIMEOUT_S, connect=CONNECT_TIMEOUT_S), "max_retries": MAX_RETRIES}
 
 
 @dataclass
@@ -93,8 +93,8 @@ class AnthropicProvider:
         except ImportError as e:
             raise ProviderError("anthropic package not installed: pip install -e '.[anthropic]'") from e
         if api_key:  # the owner's own key, for this call only: never kept on the provider
-            return anthropic.Anthropic(api_key=api_key, **paid_client_limits())
-        self._client = anthropic.Anthropic(**paid_client_limits())  # credentials from env (`ant auth login`)
+            return anthropic.Anthropic(api_key=api_key, **paid_client_limits(anthropic))
+        self._client = anthropic.Anthropic(**paid_client_limits(anthropic))  # credentials from env (`ant auth login`)
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:

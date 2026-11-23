@@ -51,8 +51,8 @@ class OpenAIProvider:
             raise ProviderError("openai package not installed: pip install -e '.[openai]'") from e
         if api_key:  # the owner's own key, for this call only: never kept on the provider
             extra = {"base_url": base_url} if base_url else {}
-            return openai.OpenAI(api_key=api_key, **extra, **paid_client_limits())
-        self._client = openai.OpenAI(**paid_client_limits())  # credentials from env (OPENAI_API_KEY from env)
+            return openai.OpenAI(api_key=api_key, **extra, **paid_client_limits(openai))
+        self._client = openai.OpenAI(**paid_client_limits(openai))  # credentials from env (OPENAI_API_KEY from env)
         return self._client
 
     def complete(self, request: ModelRequest) -> ModelResponse:

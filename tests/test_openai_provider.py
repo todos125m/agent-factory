@@ -215,3 +215,14 @@ def test_openai_call_is_budget_checked_end_to_end(session):
     gw = Gateway(session, providers={"openai": provider})
     with pytest.raises(BudgetExceeded):
         gw.call("manager", system="s", user="u", project_id=project.id)
+
+
+def test_the_openai_client_builds_with_the_sdks_own_timeout_class():
+    """Newer openai releases use `httpx2`, not `httpx`: the limits must come from the SDK, not from an import by name
+    (this failed in the Docker image with "No module named 'httpx'")."""
+    openai = pytest.importorskip("openai")
+    from app.gateway.providers import MAX_RETRIES, paid_client_limits
+
+    limits = paid_client_limits(openai)
+    client = openai.OpenAI(api_key="k" * 24, base_url="http://localhost:9/v1", **limits)
+    assert client.max_retries == MAX_RETRIES
