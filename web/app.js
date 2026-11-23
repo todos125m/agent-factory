@@ -2287,6 +2287,9 @@ function renderBuild(root, id){
           var cb = el('input', {type:'checkbox', value:o}); cb.checked = (v || []).indexOf(o) >= 0;
           input.appendChild(el('label', {class:'row'}, cb, lbl('dchoice', o)));
         });
+      } else if (kind === 'json_schema'){
+        input = el('textarea', {rows:'10', dir:'ltr', spellcheck:'false', style:'font-family:monospace;font-size:12.5px'});
+        input.value = v ? JSON.stringify(v, null, 2) : '';
       } else {
         input = el('textarea', {rows: kind === 'text' ? '3' : '2', dir:'auto'});
         input.value = Array.isArray(v) ? v.join(t('list.sep')) : (v || '');
@@ -2304,13 +2307,32 @@ function renderBuild(root, id){
         if (it.kind === 'bool') value = it.input.checked;
         else if (it.kind === 'money') value = Number(it.input.value);
         else if (it.kind === 'sources' || it.kind === 'tools') value = Array.prototype.filter.call(it.input.querySelectorAll('input'), function(c){ return c.checked; }).map(function(c){ return c.value; });
-        else value = it.input.value;
+        else if (it.kind === 'json_schema'){
+          var raw = it.input.value.trim();
+          if (!raw) return;  // an empty box changes nothing (the schema is optional)
+          try { value = JSON.parse(raw); } catch (e) { value = raw; }  // text the server answers with what is wrong
+        } else value = it.input.value;
         if (JSON.stringify(value) !== JSON.stringify(b.values[path])) changes[path] = value;
       });
       if (!Object.keys(changes).length){ status.textContent = t('design.nothing_changed'); return; }
       send('/design/edit', {branch: b.key, changes: changes}, status);
     });
     form.appendChild(el('div', {class:'btn-row'}, save));
+    var schemaBox = inputs['io_contract.output_schema'];
+    if (schemaBox){
+      // A paid call, asked for: a proposed schema from the expected output; it only fills the box, nothing is saved.
+      var propose = el('button', {class:'btn ghost sm', type:'button', text: t('design.propose_schema')});
+      propose.addEventListener('click', function(){
+        propose.disabled = true; status.className = 'muted'; status.textContent = t('design.proposing');
+        api('/factory/sessions/' + id + '/design/propose-schema?locale=' + encodeURIComponent(I18N.locale()),
+            {method:'POST', json:{expected_revision: st.session.revision, request_id: newRequestId()}})
+          .then(function(r){ schemaBox.input.value = JSON.stringify(r.schema, null, 2); status.textContent = t('design.schema_proposed'); })
+          .catch(function(e){ status.className = 'err muted'; status.textContent = e.message; })
+          .then(function(){ propose.disabled = false; });
+      });
+      form.appendChild(el('div', {class:'btn-row'}, propose));
+      form.appendChild(el('p', {class:'muted', text: t('design.schema_help')}));
+    }
     form.appendChild(status);
     return el('details', {class:'advanced'}, el('summary', {text: t('build.edit')}), form);
   }

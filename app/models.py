@@ -252,6 +252,7 @@ class Agent(Base):
     permissions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     instructions: Mapped[str] = mapped_column(Text, default="")
+    output_schema: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # the JSON shape its result must have (app/output_schema.py)
     active: Mapped[bool] = mapped_column(default=True)
 
 

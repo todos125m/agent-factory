@@ -465,7 +465,9 @@ def test_the_openai_provider_speaks_plainly_to_another_provider(monkeypatch):
     response = provider.complete(req)
     assert response.data == {"a": 1}
     assert sent["max_tokens"] == 50 and "max_completion_tokens" not in sent
-    assert "reasoning_effort" not in sent and "response_format" not in sent and "JSON schema" in sent["messages"][0]["content"]
+    # the schema goes to the other provider as a real response schema; the prompt does not carry it
+    assert "reasoning_effort" not in sent and sent["response_format"]["json_schema"]["schema"] == {"type": "object"}
+    assert "JSON schema" not in sent["messages"][0]["content"]
     sent.clear()
     provider.complete(ModelRequest(model="m", system="sys", user="u", max_output_tokens=50, json_schema={"type": "object"},
                                    effort="high", api_key="k" * 24))  # OpenAI itself keeps its own parameters
@@ -505,3 +507,38 @@ def test_only_the_owner_lists_the_models_of_a_connection(client, monkeypatch):
     other = client.post("/users", json={"email": "other@example.com"}).json()
     client.sign_in_as(other["id"])
     assert client.get(f"/credentials/{c['id']}/models").status_code == 404
+
+
+def test_a_provider_that_refuses_the_response_schema_gets_it_in_the_prompt_instead(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.gateway.openai_provider import OpenAIProvider
+    from app.gateway.providers import ModelRequest
+
+    calls = []
+
+    class Refused(Exception):
+        status_code = 400
+
+    class Completions:
+        def create(self, **kw):
+            calls.append(kw)
+            if "response_format" in kw:
+                raise Refused("response_format is not supported")
+            msg = SimpleNamespace(content='{"a": 1}', refusal=None)
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason="stop")], model="m",
+                                   usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2, prompt_tokens_details=None))
+
+    provider = OpenAIProvider()
+    monkeypatch.setattr(provider, "_get_client", lambda key, url: SimpleNamespace(chat=SimpleNamespace(completions=Completions())))
+    schema = {"type": "object", "properties": {"a": {"type": "integer"}}}
+    req = ModelRequest(model="m", system="sys", user="u", max_output_tokens=50, json_schema=schema, api_key="k" * 24,
+                       base_url=GEMINI)
+    assert provider.complete(req).data == {"a": 1}
+    assert len(calls) == 2 and "response_format" in calls[0] and "response_format" not in calls[1]
+    assert "JSON schema" in calls[1]["messages"][0]["content"]
+    calls.clear()  # a schema with $ref goes straight to the prompt (few providers take those)
+    ref = {"type": "object", "properties": {"a": {"$ref": "#/$defs/x"}}, "$defs": {"x": {"type": "integer"}}}
+    provider.complete(ModelRequest(model="m", system="sys", user="u", max_output_tokens=50, json_schema=ref,
+                                   api_key="k" * 24, base_url=GEMINI))
+    assert len(calls) == 1 and "response_format" not in calls[0]

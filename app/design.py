@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import context, factory, storable
+from app import output_schema, context, factory, storable
 from app.blueprint import validate_blueprint
 from app.errors import AppError
 from app.events import record_factory_event
@@ -59,6 +59,7 @@ TECH_STACK = "Python 3.11, FastAPI, SQLAlchemy 2, Pydantic 2, app/gateway"
 EDITABLE: dict[str, dict[str, str]] = {
     "identity": {"agent_core.description": "text", "agent_core.capabilities": "list", "agent_core.name": "name"},
     "io_actions": {"io_contract.input_example": "text", "io_contract.expected_output": "text",
+                   "io_contract.output_schema": "json_schema", "io_contract.constraints": "text",
                    "action_engine.actions": "list"},
     "knowledge": {"knowledge_boundary.allowed_sources": "sources"},
     "tools": {"tools_plugins.tools": "tools", "external_integrations.services": "list"},
@@ -149,7 +150,8 @@ def draft_from_brief(fs: FactorySession, fields: dict[str, Any]) -> dict[str, An
                      "budget": {"max_cost": _money(_value(fields, "budget"))}, "data_classification": "internal"},
         "scalability": {"deployment": "docker_compose", "evaluation": [criteria] if criteria else []},
         "io_contract": {"input_example": example, "expected_output": expected or None,
-                        "target_user": _value(fields, "target_user"), "problem": _value(fields, "problem")},
+                        "target_user": _value(fields, "target_user"), "problem": _value(fields, "problem"),
+                        "constraints": _value(fields, "constraints") or None, "output_schema": None},
         "test_plan": [
             {"kind": "normal", "input": example, "expect": expected or None},
             {"kind": "edge", "input": _loc(TEST_TEXT["edge_input"], loc), "expect": _loc(TEST_TEXT["edge_expect"], loc)},
@@ -173,6 +175,11 @@ def check(fs: FactorySession, blueprint: dict[str, Any]) -> list[str]:
                       f"({fs.interaction_policy})")
     if not _get(blueprint, "io_contract.expected_output"):
         issues.append("io_contract.expected_output: required")
+    if (schema := _get(blueprint, "io_contract.output_schema")) is not None:
+        try:
+            output_schema.clean(schema)
+        except output_schema.SchemaError as e:
+            issues.append(f"io_contract.output_schema: {e}")
     return issues
 
 
@@ -258,6 +265,11 @@ def _parse(kind: str, value: Any, path: str) -> Any:
         if storable.problem(text):
             raise bad("text that can be stored")
         return text
+    if kind == "json_schema":
+        try:
+            return output_schema.clean(value)
+        except output_schema.SchemaError as e:
+            raise bad(str(e)) from e
     if kind == "name":
         text = str(value or "").strip()
         if not re.fullmatch(r"[a-z][a-z0-9_-]{1,99}", text):
@@ -410,6 +422,48 @@ def _assist_prompt(fs: FactorySession, fields: dict[str, Any]) -> str:
              if _value(fields, name)]
     lines.append("Reply language: " + {"fa": "Persian (fa)", "en": "English (en)", "tr": "Turkish (tr)"}[fs.locale])
     return "Approved brief of the agent to design:\n" + "\n".join(lines)
+
+
+class SchemaProposalOut(storable.StorableOut):
+    schema_: dict[str, Any] = Field(alias="schema")
+
+    model_config = {"populate_by_name": True}
+
+
+def _schema_prompt(fs: FactorySession, bp: dict[str, Any]) -> str:
+    io = bp.get("io_contract") or {}
+    lines = [f"Agent: {bp['agent_core'].get('description') or ''}",
+             f"Its input, for example: {io.get('input_example') or '-'}",
+             f"What it must return: {io.get('expected_output') or '-'}",
+             f"Its limits: {io.get('constraints') or '-'}"]
+    return ("Write the JSON Schema (draft 2020-12) of the single JSON object this agent must return, from this design.\n"
+            + "\n".join(lines)
+            + "\nRules: the top level is an object with `properties` and `required`; use exact types, `enum` for a closed "
+              "list of values, `minimum`/`maximum` for ranges, `additionalProperties: false`; no `$ref`, no `$schema`; "
+              "field names exactly as the owner wrote them. Reply as {\"schema\": <the JSON Schema>}.")
+
+
+def propose_output_schema(db: Session, gateway: Gateway, owner: User, session_id: int, *, expected_revision: int
+                          ) -> dict[str, Any]:
+    """One model call, asked for by the owner, within the build's budget: a proposed output schema from the expected
+    output they described. Nothing is stored; they read it, change it if they want, and save it as an ordinary edit."""
+    fs = factory.load_session(db, session_id, owner)
+    factory._check(fs, expected_revision, "design_assist")
+    if fs.stage not in (S.DESIGNING.value, S.AWAITING_DESIGN_APPROVAL.value):
+        raise AppError(409, "stage_not_allowed", f"No design to write a schema for while the build is {fs.stage}",
+                       stage=fs.stage, action="design_assist")
+    blueprint = copy.deepcopy(current(db, fs).blueprint)
+    fid = fs.id
+    db.rollback()  # nothing of this request is open while the model runs
+    response = gateway.call("cheap", system="You write JSON Schemas for software agents. Reply only as JSON.",
+                            user=_schema_prompt(fs, blueprint), agent="manager",
+                            json_schema=SchemaProposalOut.model_json_schema(by_alias=True), factory_session_id=fid)
+    try:
+        proposal = SchemaProposalOut.model_validate(response.data)
+        schema = output_schema.clean(proposal.schema_)
+    except (ValidationError, output_schema.SchemaError) as e:
+        raise AppError(422, "request_refused", f"the model's schema is not usable: {str(e)[:200]}") from e
+    return {"schema": schema, "cost_usd": response.cost_usd}
 
 
 def assist(db: Session, gateway: Gateway, owner: User, session_id: int, *, expected_revision: int, request_id: str
