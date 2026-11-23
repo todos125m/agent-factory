@@ -30,6 +30,19 @@ from typing import Any
 from app.gateway.providers import ModelRequest, ModelResponse, ProviderError, Usage, paid_client_limits
 
 
+def _detail(error: Exception) -> str:
+    """What the provider said when its HTTP answer was an error (the SDK's short message often has no body): the
+    address that was called and the start of the answer. Never the key (the gateway redacts it from every message)."""
+    response = getattr(error, "response", None)
+    if response is None:
+        return ""
+    try:
+        url, body = str(response.request.url), response.text[:300].strip()
+    except Exception:  # noqa: BLE001 - a stand-in or an answer that can't be read: nothing more to say
+        return ""
+    return f" [{url}] {body}" if body else f" [{url}]"
+
+
 def _json_text(text: str) -> str:
     """The JSON object in a reply that may wrap it in a code fence or a sentence (other providers do)."""
     start, end = text.find("{"), text.rfind("}")
@@ -89,7 +102,7 @@ class OpenAIProvider:
         except ProviderError:
             raise
         except Exception as e:  # the openai SDK's own exception hierarchy (auth/rate-limit/API errors)
-            raise ProviderError(f"OpenAI error: {e}") from e
+            raise ProviderError(f"OpenAI error: {e}{_detail(e)}") from e
 
         if not response.choices:
             raise ProviderError("OpenAI returned no choices")

@@ -226,3 +226,14 @@ def test_the_openai_client_builds_with_the_sdks_own_timeout_class():
     limits = paid_client_limits(openai)
     client = openai.OpenAI(api_key="k" * 24, base_url="http://localhost:9/v1", **limits)
     assert client.max_retries == MAX_RETRIES
+
+
+def test_an_http_error_says_where_it_went_and_what_the_provider_answered():
+    from types import SimpleNamespace
+
+    from app.gateway.openai_provider import _detail
+
+    error = SimpleNamespace(response=SimpleNamespace(request=SimpleNamespace(url="https://x.example/v1/chat/completions"),
+                                                     text='{"error": "model not found"}'))
+    assert _detail(error) == ' [https://x.example/v1/chat/completions] {"error": "model not found"}'
+    assert _detail(ValueError("no response")) == ""
