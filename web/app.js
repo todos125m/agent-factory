@@ -375,9 +375,7 @@ function renderSetup(root){
     var card = el('div', {class:'card stack'}, el('h3', {text:t('setup.step_model')}),
       el('p', {}, el('b', {text:t('setup.method') + ': '}), lbl('access', m.access)),
       el('p', {class:'muted', text:t('setup.change_method')}));
-    card.appendChild(el('p', {class:'muted', text:t('setup.pick_method')}));
-    var open = m.access === 'claude_account' ? 'claude' : (m.access === 'ollama' ? 'ollama' : null);
-    GUIDE_GROUPS[0].topics.forEach(function(id){ card.appendChild(topicCard(id, id === open)); });
+    card.appendChild(wayChooser(m.access));
     return card;
   }
 
@@ -636,16 +634,53 @@ function topicBody(topicId, variantId, setVariant){
   return box;
 }
 
-// A topic as a card that opens (Setup): built when first opened, so Ollama is only asked about when its card is.
-function topicCard(topicId, open){
-  var d = el('details', {class:'card guide-topic', style:'background:var(--surface-2)'}, el('summary', {text:topicTitle(topicId)}));
-  var content = el('div', {class:'stack'});
-  d.appendChild(content);
-  var built = false;
-  function show(variantId){ clear(content); content.appendChild(topicBody(topicId, variantId, show)); }
-  d.addEventListener('toggle', function(){ if (d.open && !built){ built = true; show(null); } });
-  if (open) d.setAttribute('open', '');
-  return d;
+// Setup's first question: how will the factory reach a model? Four answers; only the chosen one shows its steps. For
+// "I have a key" a second question follows (which provider the key is from).
+var WAYS = [
+  {id:'claude', topic:'claude'},
+  {id:'key'},
+  {id:'ollama', topic:'ollama'},
+  {id:'free', topic:'free'}
+];
+function wayChooser(access){
+  var state = {way: access === 'claude_account' ? 'claude' : (access === 'ollama' ? 'ollama' : (access === 'api_key' ? 'key' : null)),
+    provider: null, variant: null};
+  var box = el('div', {class:'stack'});
+  function option(title, desc, on, pick){
+    var b = el('button', {type:'button', class:'opt', role:'radio', 'aria-checked': on ? 'true' : 'false'},
+      el('span', {}, el('b', {text:title}), desc ? el('small', {text:desc}) : null));
+    b.addEventListener('click', pick);
+    return b;
+  }
+  function draw(){
+    clear(box);
+    box.appendChild(el('h4', {text:t('setup.choose_title')}));
+    var ways = el('div', {class:'grid grid-2', role:'radiogroup', 'aria-label':t('setup.choose_title')});
+    WAYS.forEach(function(w){
+      ways.appendChild(option(t('setup.way_' + w.id), t('setup.way_' + w.id + '_desc'), state.way === w.id,
+        function(){ state.way = w.id; state.provider = null; state.variant = null; draw(); }));
+    });
+    box.appendChild(ways);
+    var topicId = null;
+    if (state.way === 'key'){
+      box.appendChild(el('h4', {text:t('setup.which_provider')}));
+      var grid = el('div', {class:'grid grid-3', role:'radiogroup', 'aria-label':t('setup.which_provider')});
+      KEY_PROVIDERS.forEach(function(k){
+        grid.appendChild(option(k.id === 'other' ? t('setup.provider_other') : k.name, '', state.provider === k.id,
+          function(){ state.provider = k.id; draw(); }));
+      });
+      box.appendChild(grid);
+      topicId = state.provider;
+    } else if (state.way){
+      topicId = WAYS.filter(function(w){ return w.id === state.way; })[0].topic;
+    }
+    if (topicId){
+      box.appendChild(el('div', {class:'card stack guide-panel'}, el('h3', {text:topicTitle(topicId)}),
+        topicBody(topicId, state.variant, function(v){ state.variant = v; draw(); })));
+    }
+  }
+  draw();
+  return box;
 }
 
 function renderGuide(root, parts){
