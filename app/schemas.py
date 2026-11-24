@@ -302,6 +302,14 @@ class AgentOut(ORM):
     active: bool
 
 
+class AgentDetailOut(AgentOut):
+    """One agent in full (GET /agents/{name}): what it was told and the output shape it is locked to. Kept out of the
+    list, which every page loads."""
+
+    instructions: str = ""
+    output_schema: dict[str, Any] | None = None
+
+
 class ChatMessageIn(BaseModel):
     text: str
 

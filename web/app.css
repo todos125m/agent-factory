@@ -205,6 +205,8 @@ code,pre,input[type=number]{unicode-bidi:plaintext}
 .stepbar .step.done{border-style:solid;color:var(--ink)}
 .stepbar .step.now{border:2px solid var(--accent);color:var(--ink);font-weight:800}
 .stepbar .step-num{font-variant-numeric:tabular-nums;color:var(--muted)}
+.code-scroll{max-height:360px;overflow:auto}
+.json-view .tok-key{color:var(--accent)}.json-view .tok-str{color:var(--good)}.json-view .tok-num{color:var(--warn)}.json-view .tok-lit{color:var(--bad)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .brief-row{border-top:1px solid var(--line);padding-top:8px}
 .chip.status-draft{border:1px dashed var(--line)}
