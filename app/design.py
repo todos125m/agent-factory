@@ -164,6 +164,12 @@ def draft_from_brief(fs: FactorySession, fields: dict[str, Any]) -> dict[str, An
 def check(fs: FactorySession, blueprint: dict[str, Any]) -> list[str]:
     """Every issue of this version: the standard's validator, then the design rules."""
     issues = validate_blueprint(blueprint)
+    name = _get(blueprint, "agent_core.name")
+    if name == f"agent-{fs.id}" and not _slug(fs.title or "", ""):
+        # The title had no English letters, so the name fell back to the session number. Ask for a real name instead
+        # of building an agent called agent-2.
+        issues.append("agent_core.name: write an English name for the agent (lowercase letters, digits, - or _), "
+                      "for example ticket-triage")
     permissions = _get(blueprint, "security.permissions") or {}
     for tool in _get(blueprint, "tools_plugins.tools") or []:
         needed = TOOL_PERMISSION.get(tool)
