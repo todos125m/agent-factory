@@ -204,6 +204,8 @@ code,pre,input[type=number]{unicode-bidi:plaintext}
 .stepbar .step{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px dashed var(--line);color:var(--muted);font-size:13px}
 .stepbar .step.done{border-style:solid;color:var(--ink)}
 .stepbar .step.now{border:2px solid var(--accent);color:var(--ink);font-weight:800}
+.stepbar .step-num{font-variant-numeric:tabular-nums;color:var(--muted)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .brief-row{border-top:1px solid var(--line);padding-top:8px}
 .chip.status-draft{border:1px dashed var(--line)}
 .chip.status-proposed{border:1px dashed var(--warn)}
