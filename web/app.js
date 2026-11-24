@@ -324,6 +324,32 @@ function setupIncomplete(s){
   return false;
 }
 
+// A copy button for a block of text (the clipboard may be refused: then nothing happens and the text stays selectable).
+function copyButton(text){
+  var copy = el('button', {class:'btn ghost sm', type:'button', text:t('setup.copy')});
+  copy.addEventListener('click', function(){
+    try { navigator.clipboard.writeText(text).then(function(){ copy.textContent = t('setup.copied'); }); } catch(e){}
+  });
+  return copy;
+}
+
+// JSON as text with its tokens coloured. Built from DOM nodes, never innerHTML: the text may come from a model.
+function jsonView(value){
+  var text = JSON.stringify(value, null, 2);
+  var pre = el('pre', {class:'code code-scroll json-view', dir:'ltr', tabindex:'0'});
+  var re = /(\x22(?:\\.|[^\x22\\])*\x22)(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;  // \x22 is the quote mark
+  var last = 0, m;
+  while ((m = re.exec(text)) !== null){
+    if (m.index > last) pre.appendChild(document.createTextNode(text.slice(last, m.index)));
+    var cls = m[1] ? (m[2] ? 'tok-key' : 'tok-str') : (m[3] ? 'tok-lit' : 'tok-num');
+    pre.appendChild(el('span', {class: cls, text: m[1] || m[0]}));
+    if (m[2]) pre.appendChild(document.createTextNode(m[2]));
+    last = re.lastIndex;
+  }
+  if (last < text.length) pre.appendChild(document.createTextNode(text.slice(last)));
+  return pre;
+}
+
 function codeLine(text){
   var copy = el('button', {class:'btn ghost sm', type:'button', text:t('setup.copy')});
   copy.addEventListener('click', function(){
@@ -1785,6 +1811,22 @@ function renderAgentDetail(root, name, startTab){
   // Tab 2: what the agent is made of (the technical detail, kept out of the first screen).
   function drawInspector(panel){
     var agent = agentData, allSkills = skillsData, body = panel;
+
+    // What it was told: the whole text sent to the model on every run.
+    body.appendChild(el('div', {class:'card stack'},
+      el('div', {class:'row', style:'justify-content:space-between;align-items:center'},
+        el('h3', {text: t('inspector.prompt')}), agent.instructions ? copyButton(agent.instructions) : null),
+      el('p', {class:'muted', text: t('inspector.prompt_help')}),
+      agent.instructions ? el('pre', {class:'code code-scroll', dir:'auto', tabindex:'0', text: agent.instructions})
+        : el('p', {class:'muted', text: t('inspector.no_prompt')})));
+
+    // The reply shape it is locked to (app/output_schema.py).
+    body.appendChild(el('div', {class:'card stack'},
+      el('div', {class:'row', style:'justify-content:space-between;align-items:center'},
+        el('h3', {text: t('inspector.schema')}), agent.output_schema ? copyButton(JSON.stringify(agent.output_schema, null, 2)) : null),
+      el('p', {class:'muted', text: t('inspector.schema_help')}),
+      agent.output_schema ? jsonView(agent.output_schema) : el('p', {class:'muted', text: t('inspector.no_schema')})));
+
     var caps = el('div', {class:'card stack'}, el('h3', {text:t('agent.capabilities')}),
       el('div', {class:'row'}, agent.capabilities.map(function(c){ return el('span', {class:'chip', text:c}); })));
     body.appendChild(caps);
