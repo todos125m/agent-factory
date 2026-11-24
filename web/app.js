@@ -795,7 +795,7 @@ function route(){
   else if (page === 'build' && parts[1]) renderBuild(root, Number(parts[1]));
   else if (page === 'workflows') renderWorkflowsList(root);
   else if (page === 'workflow' && parts[1]) renderWorkflow(root, Number(parts[1]));
-  else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]));
+  else if (page === 'agents' && parts[1]) renderAgentDetail(root, decodeURIComponent(parts[1]), parts[2]);
   else if (page === 'agents') renderAgentsList(root);
   else if (page === 'benchmark') renderBenchmark(root);
   else if (page === 'settings') renderSettings(root);
@@ -1703,7 +1703,7 @@ function renderAgentsList(root){
   }).catch(function(e){ clear(body); body.appendChild(errorBox(e.message)); });
 }
 
-function renderAgentDetail(root, name){
+function renderAgentDetail(root, name, startTab){
   root.appendChild(el('div', {class:'page-head'},
     el('button', {class:'btn ghost sm', onclick:function(){ go('agents'); }}, t('agents.back')),
     el('h2', {text:name})));
@@ -1713,29 +1713,31 @@ function renderAgentDetail(root, name){
   root.appendChild(body);
   body.appendChild(loadingBox());
 
-  var tab = 'overview', agentData = null, skillsData = null, feedbackCount = null;
+  var tab = ['playground','inspector','integrate'].indexOf(startTab) >= 0 ? startTab : 'playground';
+  var agentData = null, skillsData = null;
 
   function tabBtn(key, label){
-    var b = el('button', {class:'tab' + (tab === key ? ' active' : ''), role:'tab', text:label});
+    var b = el('button', {class:'tab' + (tab === key ? ' active' : ''), role:'tab', type:'button',
+      'aria-selected': String(tab === key), text:label});
     b.addEventListener('click', function(){ tab = key; drawTabs(); draw(); });
     return b;
   }
   function drawTabs(){
     clear(tabsHolder);
-    tabsHolder.appendChild(tabBtn('overview', t('tab.overview')));
-    tabsHolder.appendChild(tabBtn('feedback', t('agent.tab.training') + (feedbackCount !== null ? ' (' + fmtNum(feedbackCount) + ')' : '')));
+    tabsHolder.appendChild(tabBtn('playground', t('tab.playground')));
+    tabsHolder.appendChild(tabBtn('inspector', t('tab.inspector')));
+    tabsHolder.appendChild(tabBtn('integrate', t('tab.integrate')));
   }
   function draw(){
     clear(body);
-    if (tab === 'overview') drawOverview(body);
-    else drawFeedback(body);
+    if (tab === 'playground') drawPlayground(body);
+    else if (tab === 'inspector') drawInspector(body);
+    else drawIntegrate(body);
   }
 
   function drawFeedback(panel){
     panel.appendChild(loadingBox());
     api('/agents/' + encodeURIComponent(name) + '/feedback').then(function(list){
-      feedbackCount = list.length;
-      drawTabs();
       clear(panel);
       if (!list.length){ panel.appendChild(emptyBox('learn', t('agent.feedback_empty_title'), t('agent.feedback_empty_sub'))); return; }
       var card = el('div', {class:'card'});
@@ -1751,15 +1753,38 @@ function renderAgentDetail(root, name){
     }).catch(function(e){ clear(panel); panel.appendChild(errorBox(e.message, function(){ drawFeedback(panel); })); });
   }
 
-  function drawOverview(panel){
-    var agent = agentData, allSkills = skillsData, body = panel;
-    body.appendChild(el('div', {class:'card stack'},
+  // Tab 1: what the agent is, the one main next step, and what owners taught it.
+  function drawPlayground(panel){
+    var agent = agentData;
+    var next = el('button', {class:'btn', type:'button', text: t('agent.connect_button')});
+    next.addEventListener('click', function(){ tab = 'integrate'; drawTabs(); draw(); });
+    panel.appendChild(el('div', {class:'card stack'},
       el('p', {text: agentText(agent)}),
       el('div', {class:'row'},
         el('span', {class:'chip', text: t('agent.model_role', {role: lbl('role', agent.model_role)})}),
-        agent.active ? el('span', {class:'chip', text:t('common.active')}) : el('span', {class:'chip', text:t('common.inactive')}))
-    ));
+        agent.active ? el('span', {class:'chip', text:t('common.active')}) : el('span', {class:'chip', text:t('common.inactive')})),
+      agent.active ? el('div', {class:'btn-row'}, next) : null));
+    var training = el('div', {class:'stack'});
+    panel.appendChild(el('h3', {text: t('agent.tab.training')}));
+    panel.appendChild(training);
+    drawFeedback(training);
+  }
 
+  // Tab 3: how software outside calls this agent (app/routers/external.py), and the keys that let it.
+  function drawIntegrate(panel){
+    panel.appendChild(el('div', {class:'card stack'},
+      el('h3', {text: t('integrate.title')}),
+      el('p', {class:'muted', text: t('integrate.help')}),
+      el('b', {text: t('integrate.address')}),
+      el('pre', {class:'code', dir:'ltr', text: location.origin + '/api/v1'}),
+      el('b', {text: t('integrate.agent_name')}),
+      el('pre', {class:'code', dir:'ltr', text: name})));
+    panel.appendChild(apiKeysCard());
+  }
+
+  // Tab 2: what the agent is made of (the technical detail, kept out of the first screen).
+  function drawInspector(panel){
+    var agent = agentData, allSkills = skillsData, body = panel;
     var caps = el('div', {class:'card stack'}, el('h3', {text:t('agent.capabilities')}),
       el('div', {class:'row'}, agent.capabilities.map(function(c){ return el('span', {class:'chip', text:c}); })));
     body.appendChild(caps);
@@ -1917,14 +1942,28 @@ function readable(value){
 
 /* ============================== building an agent (app/factory.py) ============================== */
 
+// The four steps an owner sees. Each one covers the factory stages that belong to it (app/factory.py).
 var BUILD_STEPS = [
-  {key:'understand', stages:['DRAFT','CLARIFYING']},
-  {key:'brief', stages:['AWAITING_BRIEF_APPROVAL']},
-  {key:'design', stages:['DESIGNING','AWAITING_DESIGN_APPROVAL']},
-  {key:'build', stages:['BUILDING']},
-  {key:'evaluate', stages:['EVALUATING','AWAITING_ACTIVATION_APPROVAL']},
-  {key:'active', stages:['ACTIVE']}
+  {key:'define', stages:['DRAFT','CLARIFYING','AWAITING_BRIEF_APPROVAL']},
+  {key:'review', stages:['DESIGNING','AWAITING_DESIGN_APPROVAL']},
+  {key:'evaluate', stages:['BUILDING','EVALUATING','AWAITING_ACTIVATION_APPROVAL']},
+  {key:'connect', stages:['ACTIVE']}
 ];
+
+function lifecycleBar(stage){
+  var bar = el('ol', {class:'stepbar', 'aria-label': t('build.steps')});
+  var reached = true;
+  BUILD_STEPS.forEach(function(step, i){
+    var here = step.stages.indexOf(stage) >= 0;
+    var cls = here ? 'step now' : (reached ? 'step done' : 'step');
+    bar.appendChild(el('li', {class: cls, 'aria-current': here ? 'step' : null},
+      el('span', {class:'step-mark', 'aria-hidden':'true'}, here ? icon('dot') : (reached ? icon('check') : icon('pending'))),
+      el('span', {class:'step-num', 'aria-hidden':'true', text: fmtNum(i + 1) + '.'}),
+      el('span', {text: t('build.step.' + step.key)})));
+    if (here) reached = false;
+  });
+  return bar;
+}
 
 function newRequestId(){
   try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, ''); } catch(e){}
@@ -1969,20 +2008,6 @@ function renderBuild(root, id){
         if (e.code === 'stale_revision' || e.code === 'stale_version'){ notify(t('build.stale')); load(); return; }
         if (status) status.textContent = e.message; else notify(e.message);
       });
-  }
-
-  function stepBar(stage){
-    var bar = el('ol', {class:'stepbar', 'aria-label': t('build.steps')});
-    var reached = true;
-    BUILD_STEPS.forEach(function(step){
-      var here = step.stages.indexOf(stage) >= 0;
-      var cls = here ? 'step now' : (reached ? 'step done' : 'step');
-      bar.appendChild(el('li', {class: cls, 'aria-current': here ? 'step' : null},
-        el('span', {class:'step-mark', 'aria-hidden':'true'}, here ? icon('dot') : (reached ? icon('check') : icon('pending'))),
-        el('span', {text: t('build.step.' + step.key)})));
-      if (here) reached = false;
-    });
-    return bar;
   }
 
   function questionCard(q){
@@ -2136,6 +2161,10 @@ function renderBuild(root, id){
     }
     var active = (b.history || []).filter(function(v){ return v.state === 'active'; })[0];
     if (active) card.appendChild(el('p', {class:'chip status-COMPLETED', text: t('agentbuild.active', {agent: active.agent, version: fmtNum(active.version)})}));
+    if (active && stage === 'ACTIVE'){
+      card.appendChild(el('div', {class:'btn-row'}, el('button', {class:'btn', type:'button',
+        onclick: function(){ go('agents/' + encodeURIComponent(active.agent) + '/integrate'); }}, t('agent.connect_button'))));
+    }
     if ((b.history || []).length > 1 || (active && stage === 'ACTIVE')){
       var list = el('div', {class:'stack', style:'gap:6px'}, el('b', {text: t('agentbuild.history')}));
       b.history.forEach(function(v){
@@ -2398,7 +2427,7 @@ function renderBuild(root, id){
     clear(body);
     var title = document.getElementById('build-title');
     if (title) title.textContent = st.session.title || t('build.title');
-    body.appendChild(stepBar(st.session.stage === 'PAUSED' ? null : st.session.stage));
+    body.appendChild(lifecycleBar(st.session.stage === 'PAUSED' ? null : st.session.stage));
     body.appendChild(el('p', {class:'muted', text: t('build.policy', {policy: lbl('policy', st.session.interaction_policy)})}));
     if (st.session.stage === 'PAUSED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.paused_banner')}));
     if (st.session.stage === 'CANCELLED') body.appendChild(el('p', {class:'notice', role:'status', text: t('build.cancelled_banner')}));

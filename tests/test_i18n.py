@@ -122,7 +122,7 @@ LABELLED = {
     "fsource": ["user", "default", "suggestion", "unknown"],
     "fstage": [s.value for s in FactoryStage],
     "bfield": [s["field"] for s in field_specs()],
-    "build.step": ["understand", "brief", "design", "build", "evaluate", "active"],
+    "build.step": ["define", "review", "evaluate", "connect"],
     "build.conflict": ["internet_vs_constraints"],
     "branch": list(BRANCHES),
     "branch_help": list(BRANCHES),
@@ -141,6 +141,15 @@ LABELLED = {
 def test_every_value_shown_with_a_label_has_one(group):
     messages = _messages()["en"]
     assert [v for v in LABELLED[group] if f"{group}.{v}" not in messages] == []
+
+
+def test_every_stage_of_a_build_in_progress_is_on_the_lifecycle_bar():
+    """The four-step bar (web/app.js BUILD_STEPS) must cover every stage a build passes through; a stage with no step
+    would leave the bar showing nothing as current."""
+    block = re.search(r"var BUILD_STEPS = \[(.*?)\];", _app(), re.S).group(1)
+    covered = set(re.findall(r"'([A-Z_]+)'", block))
+    aside = {"PAUSED", "BLOCKED", "FAILED", "CANCELLED"}  # a build set aside is not a step of the way
+    assert {s.value for s in FactoryStage} - aside - covered == set()
 
 
 def test_every_label_group_app_js_uses_is_checked():
